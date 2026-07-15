@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PixelVille — drag &amp; drop village builder</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏘️</text></svg>">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div id="logo"><span class="logo-icon">🏘️</span><span>PixelVille</span></div>
+    <div id="palette"></div>
+  </aside>
+
+  <main id="canvas-wrap">
+    <canvas id="game"></canvas>
+    <div id="vignette"></div>
+
+    <div id="topbar">
+      <span id="clock">Day 1 · Mon · 07:00</span>
+      <span class="divider"></span>
+      <span class="chip" id="chip-season">🌸 Spring</span>
+      <span class="chip" id="chip-weather">☀️ Clear</span>
+      <span class="divider"></span>
+      <span class="stat" title="Population">👥 <b id="stat-pop">0</b></span>
+      <span class="stat" title="Employed / adults">💼 <b id="stat-jobs">0/0</b></span>
+      <span class="stat" title="Combined household wealth">💰 <b id="stat-wealth">$0</b></span>
+      <span class="stat" title="Town safety">🛡️ <b id="stat-safe">92%</b></span>
+      <span class="stat" title="Happiness"><span id="stat-hap-emoji">😊</span> <b id="stat-hap">100%</b></span>
+      <span class="stat" id="stat-leader-wrap" title="Village leadership">🗳️ <b id="stat-leader">Self-governing</b></span>
+      <span class="divider"></span>
+      <span id="speed">
+        <button title="Pause (space)">⏸</button><button title="Normal speed">▶</button><button title="Fast">⏩</button><button title="Very fast">⏭</button>
+      </span>
+      <span id="filebtns">
+        <button id="btn-sound" title="Sound on/off">🔊</button>
+        <button id="btn-save" title="Save to browser">💾</button>
+        <button id="btn-load" title="Load save">📂</button>
+        <button id="btn-new" title="New map">🗺️</button>
+        <button id="btn-help" title="Help">❔</button>
+      </span>
+    </div>
+
+    <div id="hint"></div>
+    <div id="info"></div>
+    <div id="toasts"></div>
+
+    <div id="sc-panel">
+      <div id="rci" title="Demand: Residential · Commercial · Industrial (jobs)">
+        <div class="rci-col"><div class="rci-track"><i id="rci-r"></i></div><b class="rci-r">R</b></div>
+        <div class="rci-col"><div class="rci-track"><i id="rci-c"></i></div><b class="rci-c">C</b></div>
+        <div class="rci-col"><div class="rci-track"><i id="rci-i"></i></div><b class="rci-i">I</b></div>
+      </div>
+      <canvas id="minimap" width="128" height="128" title="Click to jump"></canvas>
+    </div>
+
+    <div id="help">
+      <div id="help-card">
+        <h1>🏘️ Welcome to PixelVille</h1>
+        <p>A living sandbox where <b>you drop the buildings and the village figures out the rest</b>.</p>
+        <ul>
+          <li>🏠 <b>Drop a house</b> — a road appears automatically and a family moves in, car and all.</li>
+          <li>🏪 <b>Drop a shop, office or school</b> — roads connect themselves, people get jobs, kids enroll, and everyone replans their day.</li>
+          <li>🌄 <b>Drop mountains, rivers &amp; lakes</b> — roads carve around rock and bridge over water. Watch for hikers on the peaks… and mysterious lights up there at night.</li>
+          <li>🍂 <b>Seasons &amp; weather</b> — spring blossoms, summer fireflies, autumn leaves, winter snow. Rain pours, storms flash, and heavy rain leaves puddles.</li>
+          <li>🌙 <b>Real nights</b> — glowing windows, street lamps, car headlights, torches.</li>
+          <li>🚨 <b>Crime &amp; justice</b> — unemployment breeds burglars. Build a police station (and a courthouse) to keep the town safe.</li>
+        </ul>
+        <p class="help-controls">
+          <b>Controls:</b> click a palette item, then click the map to place · drag map or WASD to pan ·
+          wheel to zoom · right-click / Esc to cancel a tool · click any building to inspect it · space pauses ·
+          keys 1–4 set game speed.
+        </p>
+        <button id="help-close">Start building ▶</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="js/sprites.js"></script>
+<script src="js/world.js"></script>
+<script src="js/weather.js"></script>
+<script src="js/sounds.js"></script>
+<script src="js/agents.js"></script>
+<script src="js/gov.js"></script>
+<script src="js/life.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
