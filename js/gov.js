@@ -19,17 +19,17 @@ const LEADER_TYPES = [
   {
     kind: 'visionary', emoji: '💖', zeal: 1.35, skim: 0,
     label: 'a visionary with a pure heart',
-    builds: ['park', 'school', 'library', 'playground', 'hospital', 'pool'],
+    builds: ['park', 'school', 'library', 'playground', 'hospital', 'pool', 'grandpark', 'plaza', 'zoo'],
   },
   {
     kind: 'business', emoji: '📈', zeal: 1.05, skim: 0.08,
     label: 'a sharp business mind',
-    builds: ['shop', 'market', 'office', 'factory', 'mall', 'bank'],
+    builds: ['shop', 'market', 'office', 'factory', 'mall', 'bank', 'deptstore', 'trainstation', 'dock'],
   },
   {
     kind: 'steady', emoji: '🧱', zeal: 0.8, skim: 0.03,
     label: 'a careful, dependable planner',
-    builds: ['fire', 'police', 'school', 'park', 'library'],
+    builds: ['fire', 'police', 'school', 'park', 'library', 'busstop', 'postoffice'],
   },
   {
     kind: 'corrupt', emoji: '🐍', zeal: 0.3, skim: 0.55,
@@ -42,7 +42,14 @@ const CIVIC_COSTS = {
   fire: 260, police: 260, school: 320, hospital: 420, park: 140, library: 200,
   playground: 100, pool: 180, townhall: 380, shop: 160, market: 220, office: 300,
   factory: 340, mall: 480, bank: 300, house: 190, apartment: 430,
+  busstop: 45, taxistand: 70, trainstation: 420, dock: 340, heliport: 560,
+  postoffice: 210, plaza: 170, grandpark: 320, zoo: 720, rowhouse: 300,
+  courthouse: 420, powerplant: 780, deptstore: 700,
 };
+
+/* how far one station's protection reaches (manhattan tiles); a town that
+   outgrows the radius needs a second station in the new district */
+const COVERAGE_RADIUS = { police: 32, fire: 30, school: 36 };
 
 const civicClamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
@@ -78,6 +85,68 @@ const Gov = {
   },
 
   say(message) { if (typeof Life !== 'undefined') Life.say(message); },
+
+  /* ---------- government land office ----------
+     All undeveloped land belongs to the village. Prices per tile follow
+     the market: central plots near the town hall cost several times what
+     an edge-of-map field does, and waterfront carries a premium. */
+  townCenter() {
+    const hall = World.buildings.find(b => b.type === 'townhall' && !b.ruined);
+    if (hall) return { x: hall.x + (hall.w >> 1), y: hall.y + (hall.h >> 1) };
+    // otherwise: the centroid of the built village
+    const built = World.buildings.filter(b => !b.ruined);
+    if (!built.length) return { x: GW >> 1, y: GH >> 1 };
+    let sx = 0, sy = 0;
+    for (const b of built) { sx += b.x; sy += b.y; }
+    return { x: Math.round(sx / built.length), y: Math.round(sy / built.length) };
+  },
+
+  landPrice(x, y) {
+    const c = this.townCenter();
+    const dist = Math.abs(x - c.x) + Math.abs(y - c.y);
+    const centrality = Math.max(0, 1 - dist / 70);
+    let price = 4 + 24 * centrality * centrality;
+    // waterfront premium
+    for (const [dx, dy] of [[0, -2], [2, 0], [0, 2], [-2, 0]])
+      if (World.inB(x + dx, y + dy) && World.ground[World.idx(x + dx, y + dy)] === G_WATER) { price *= 1.3; break; }
+    return Math.round(price);
+  },
+
+  landCostFor(key, x, y) {
+    const d = CAT[key];
+    return this.landPrice(x + (d.w >> 1), y + (d.h >> 1)) * d.w * d.h;
+  },
+
+  districtName(x, y) {
+    const c = this.townCenter();
+    const dist = Math.abs(x - c.x) + Math.abs(y - c.y);
+    if (dist < 14) return 'town centre';
+    if (dist < 30) return 'inner district';
+    if (dist < 48) return 'outskirts';
+    return 'far countryside';
+  },
+
+  /* ---------- service coverage: one station cannot police a whole city ----------
+     Returns {x, y, count} for the centre of the largest cluster of buildings
+     that no active station of this type reaches, or null if covered. */
+  coverageGap(type) {
+    const radius = COVERAGE_RADIUS[type];
+    if (!radius) return null;
+    const stations = World.buildings.filter(b => b.type === type && !b.ruined);
+    if (!stations.length) return null; // "no station at all" is handled separately
+    const uncovered = [];
+    for (const b of World.buildings) {
+      if (b.ruined || !b.connected || b.type === type) continue;
+      let near = false;
+      for (const s of stations)
+        if (Math.abs(s.x - b.x) + Math.abs(s.y - b.y) <= radius) { near = true; break; }
+      if (!near) uncovered.push(b);
+    }
+    if (uncovered.length < 7) return null;
+    let sx = 0, sy = 0;
+    for (const b of uncovered) { sx += b.x; sy += b.y; }
+    return { x: Math.round(sx / uncovered.length), y: Math.round(sy / uncovered.length), count: uncovered.length };
+  },
 
   activeBuildings(type) {
     return World.buildings.filter(b => (!type || b.type === type) && b.connected && !b.construction && !b.ruined);
@@ -182,27 +251,58 @@ const Gov = {
       c.color = CAND_COLORS[i % CAND_COLORS.length];
       c.promise = this.promiseFor(c);
     });
-    // banners strung along busy streets, roughly one per candidate colour
+    // banners strung along busy streets — election season should be IMPOSSIBLE to miss
     const roads = [];
     for (let i = 0; i < World.roadMap.length; i++) if (World.roadMap[i]) roads.push(i);
     const banners = [];
-    for (let k = 0; k < 40 && banners.length < 12 && roads.length; k++) {
+    for (let k = 0; k < 90 && banners.length < 22 && roads.length; k++) {
       const r = roads[(Math.random() * roads.length) | 0];
       const x = r % GW, y = (r / GW) | 0;
-      if (banners.some(bn => Math.abs(bn.x - x) + Math.abs(bn.y - y) < 5)) continue;
+      if (banners.some(bn => Math.abs(bn.x - x) + Math.abs(bn.y - y) < 4)) continue;
       banners.push({ x, y, ci: banners.length % candidates.length });
     }
-    this.campaign = { candidates, electionDay, banners, nextRally: 0, reason };
-    this.say(`🗳️ Election season! ${candidates.map(c => `${c.name} ${c.type.emoji}`).join(' vs ')} — voting in ${electionDay - Sim.day} days.`);
+    // each candidate pitches a campaign camp — a tent with volunteers beside a road
+    const camps = [];
+    for (let ci = 0; ci < candidates.length; ci++) {
+      for (let k = 0; k < 60; k++) {
+        const r = roads[(Math.random() * roads.length) | 0];
+        const rx = r % GW, ry = (r / GW) | 0;
+        const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+        const [dx, dy] = dirs[(Math.random() * 4) | 0];
+        const x = rx + dx, y = ry + dy;
+        if (!World.inB(x, y)) continue;
+        const i = World.idx(x, y);
+        if (World.ground[i] !== G_GRASS || World.bmap[i] || World.roadMap[i] || World.railMap[i]) continue;
+        if (camps.some(cp => Math.abs(cp.x - x) + Math.abs(cp.y - y) < 9)) continue;
+        camps.push({ x, y, ci });
+        break;
+      }
+    }
+    this.campaign = { candidates, electionDay, banners, camps, nextRally: 0, reason, votingDay: false };
+    this.say(`🗳️ Election season! ${candidates.map(c => `${c.name} ${c.type.emoji}`).join(' vs ')} — voting in ${electionDay - Sim.day} days. Banners, camps and campaign cars are everywhere.`);
+    if (typeof Tasks !== 'undefined')
+      Tasks.add('election' + electionDay, '🗳️', `Hold the ${reason || 'election'} — polls open day ${electionDay}`);
   },
 
   campaignTick() {
     const c = this.campaign;
     if (!c) return;
-    if (Sim.day >= c.electionDay) {
+    if (Sim.day > c.electionDay) {
+      // the votes were cast yesterday; results are in
       this.elect({ reason: c.reason || 'annual election', candidates: c.candidates });
+      if (typeof Tasks !== 'undefined')
+        Tasks.done('election' + c.electionDay, true, `${c.reason || 'Election'} held — ${this.leader ? this.leader.name + ' won' : 'votes counted'}`);
       this.campaign = null;
-      if (typeof Life !== 'undefined') Life.rally = null;
+      if (typeof Life !== 'undefined') { Life.rally = null; Life.votingBooths = null; }
+      return;
+    }
+    if (Sim.day === c.electionDay) {
+      // VOTING DAY: booths go up outside the town hall, queues form all day
+      if (!c.votingDay) {
+        c.votingDay = true;
+        this.say('🗳️ POLLS ARE OPEN! Villagers are queueing at the voting booths — results tonight.');
+        if (typeof Life !== 'undefined') Life.setupVotingBooths(c);
+      }
       return;
     }
     // today's rally, rotating through the candidates
@@ -426,21 +526,42 @@ const Gov = {
     const stats = Sim.stats();
     const pop = Sim.people.length;
     const kids = Sim.people.filter(p => p.kind === 'kid').length;
-    const parks = World.buildings.filter(b => (b.type === 'park' || b.type === 'playground') && !b.ruined).length;
+    const parks = World.buildings.filter(b => ['park', 'playground', 'grandpark', 'plaza'].includes(b.type) && !b.ruined).length;
     const needs = [];
+    const underCon = t => World.buildings.some(b => b.type === t && b.construction > 0 && !b.ruined);
     // a single fire is remembered long enough for the village to act on it
     if (typeof Life !== 'undefined' && Life.firesRecent >= 0.5 && !this.hasPlanned('fire')) needs.push('fire');
     if (typeof Life !== 'undefined' && Life.crimes >= 2 && !this.hasPlanned('police')) needs.push('police');
+    // a growing city needs a station in EVERY district, not just one downtown
+    for (const svc of ['police', 'fire'])
+      if (this.hasPlanned(svc) && !underCon(svc) && this.coverageGap(svc)) needs.push(svc);
     if (this.leader && !this.hasPlanned('townhall')) needs.push('townhall');
     if (kids >= 4 && !this.hasPlanned('school')) needs.push('school');
+    // crowded classrooms → a second school across town
+    const schools = World.buildings.filter(b => b.type === 'school' && !b.ruined).length;
+    if (schools >= 1 && kids > schools * 14 && !underCon('school')) needs.push('school');
+    // serious crime demands a courthouse
+    if (typeof Life !== 'undefined' && (Life.arrests >= 3 || Life.graveCases > 0) && !this.hasPlanned('courthouse'))
+      needs.push('courthouse');
     // housing pressure: no vacancies while jobs go begging → build homes
     const resUnderCon = World.buildings.some(b => CAT[b.type].res && b.construction > 0 && !b.ruined);
     if (!resUnderCon && stats.vacant === 0 && stats.demand.r > 0.4)
       needs.push(pop >= 30 ? 'apartment' : 'house');
-    if (pop >= 8 && !['shop', 'market', 'mall'].some(t => this.hasPlanned(t))) needs.push('shop');
+    if (pop >= 8 && !['shop', 'market', 'mall', 'deptstore'].some(t => this.hasPlanned(t))) needs.push('shop');
     if (pop >= 45 && !this.hasPlanned('hospital')) needs.push('hospital');
     if (pop >= 55 && !this.hasPlanned('market')) needs.push('market');
-    if (parks < Math.floor(pop / 22)) needs.push('park');
+    if (pop >= 70 && !this.hasPlanned('deptstore')) needs.push('deptstore');
+    // public transport grows with the town
+    const stops = World.buildings.filter(b => b.type === 'busstop' && !b.ruined).length;
+    if (pop >= 16 && stops < Math.min(6, Math.floor(pop / 18)) && !underCon('busstop')) needs.push('busstop');
+    if (pop >= 32 && !this.hasPlanned('taxistand')) needs.push('taxistand');
+    if (pop >= 28 && !this.hasPlanned('postoffice')) needs.push('postoffice');
+    if (pop >= 45 && typeof Life !== 'undefined' && Life.waterTiles.length > 45 && !this.hasPlanned('dock')) needs.push('dock');
+    if (pop >= 85 && !this.hasPlanned('heliport')) needs.push('heliport');
+    // green space: parks first, then a proper grand park and a plaza
+    if (parks < Math.floor(pop / 20)) needs.push('park');
+    if (pop >= 40 && !this.hasPlanned('plaza')) needs.push('plaza');
+    if (pop >= 55 && !this.hasPlanned('grandpark')) needs.push('grandpark');
     return needs;
   },
 
@@ -460,7 +581,9 @@ const Gov = {
     if (!key) return false;
     const cost = CIVIC_COSTS[key] || 220;
     if (this.treasury < cost) return false;
-    const spot = World.findBuildSpot(key);
+    // a station built to close a coverage gap goes INTO the underserved district
+    const target = COVERAGE_RADIUS[key] && this.hasPlanned(key) ? this.coverageGap(key) : null;
+    const spot = World.findPlannedSpot(key, target);
     if (!spot) return false;
     const b = World.placeBuilding(key, spot.x, spot.y);
     if (!b) return false;
@@ -469,7 +592,9 @@ const Gov = {
     this.unmetNeeds[key] = 0;
     L.built = (L.built || []).concat(CAT[key].name).slice(-8); // the record they run on
     World.refreshConnections();
-    this.say(`🏛️ Mayor ${L.name} approved a new ${CAT[key].name}.`);
+    this.say(target
+      ? `🏛️ Mayor ${L.name} approved a second ${CAT[key].name} for the underserved ${this.districtName(spot.x, spot.y)}.`
+      : `🏛️ Mayor ${L.name} approved a new ${CAT[key].name}.`);
     return true;
   },
 
@@ -486,7 +611,7 @@ const Gov = {
     if (this.officeTimer < 2) return;
     const cost = CIVIC_COSTS.townhall;
     if (this.treasury >= cost) {
-      const spot = World.findBuildSpot('townhall');
+      const spot = World.findPlannedSpot('townhall');
       if (!spot) return;
       const b = World.placeBuilding('townhall', spot.x, spot.y);
       if (!b) return;
@@ -515,14 +640,22 @@ const Gov = {
   communityTick() {
     const needs = this.assessNeedsList();
     for (const key of Object.keys(this.needTimers))
-      if (!needs.includes(key)) { this.needTimers[key] = 0; this.unmetNeeds[key] = 0; }
+      if (!needs.includes(key)) {
+        if (this.needTimers[key] >= 2 && typeof Tasks !== 'undefined')
+          Tasks.done('need-' + key, true, `Village need met: ${CAT[key] ? CAT[key].name : key}`);
+        this.needTimers[key] = 0; this.unmetNeeds[key] = 0;
+      }
     for (const need of needs) {
       if (World.buildings.some(b => b.type === need && b.construction > 0)) {
+        if (this.needTimers[need] >= 2 && typeof Tasks !== 'undefined')
+          Tasks.done('need-' + need, true, `Village need met: ${CAT[need].name} under construction`);
         this.needTimers[need] = 0; this.unmetNeeds[need] = 0;
         continue;
       }
       this.needTimers[need] = (this.needTimers[need] || 0) + 1;
       this.unmetNeeds[need] = (this.unmetNeeds[need] || 0) + 1;
+      if (this.needTimers[need] === 2 && typeof Tasks !== 'undefined')
+        Tasks.add('need-' + need, '🏛️', `The village needs a ${CAT[need].name.toLowerCase()}`);
     }
     // one community project a day, most pressing ripe need first — emergencies
     // (fires, crime waves) exhaust patience with town hall fastest
@@ -539,7 +672,8 @@ const Gov = {
     const homes = World.buildings.filter(b => CAT[b.type].res && b.residents.length && b.funds > 8 && !b.ruined);
     const pool = homes.reduce((sum, b) => sum + b.funds, 0);
     if (pool < cost * (urgent ? 1.0 : 1.15)) return false; // a poor village needs time to save
-    const spot = World.findBuildSpot(need);
+    const target = COVERAGE_RADIUS[need] && this.hasPlanned(need) ? this.coverageGap(need) : null;
+    const spot = World.findPlannedSpot(need, target);
     if (!spot) return false;
     const b = World.placeBuilding(need, spot.x, spot.y);
     if (!b) return false;

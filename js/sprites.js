@@ -241,6 +241,7 @@ def('skyscraper', {
     p.rect(4, 12, W - 8, H - 13, '#7e99b8'); p.fr(4, 12, W - 8, H - 13, '#43597a');
     p.rect(10, 2, W - 20, 12, '#8fa9c6'); p.fr(10, 2, W - 20, 12, '#43597a');
     p.vl(W >> 1, 0, 3, '#43597a'); p.px(W >> 1, 0, '#e05a5a'); // antenna
+    p.disc(9, 15, 4, '#5f7793'); p.vl(8, 13, 4, '#f2ede0'); p.vl(10, 13, 4, '#f2ede0'); p.px(9, 15, '#f2ede0'); // helipad on the lower roof
     for (let y = 15; y < H - 14; y += 6)
       for (let x = 7; x + 3 < W - 6; x += 6) p.win(x, y, 3, 3);
     p.rect(6, H - 12, W - 12, 11, '#5f7793'); // lobby
@@ -395,6 +396,8 @@ def('hospital', {
     baseBld(p, W, H, ex, R, { wall: '#eef0f2', roof: '#c8ced6', style: 'tower', winW: 5, winH: 5 });
     p.rect((W >> 1) - 5, 5, 10, 10, '#f2f4f6'); p.fr((W >> 1) - 5, 5, 10, 10, '#a0a8b2');
     p.rect((W >> 1) - 1, 7, 2, 6, '#e05a5a'); p.rect((W >> 1) - 3, 9, 6, 2, '#e05a5a'); // red cross
+    p.disc(8, 6, 5, '#8a929c'); p.g.strokeStyle = '#f2ede0'; p.g.beginPath(); p.g.arc(8, 6, 4, 0, 7); p.g.stroke();
+    p.vl(7, 4, 5, '#f2ede0'); p.vl(9, 4, 5, '#f2ede0'); p.hl(7, 6, 3, '#f2ede0'); // rooftop helipad
   }
 });
 def('police', {
@@ -569,14 +572,395 @@ def('pool', {
   }
 });
 
-/* nature + tools (no draw fn — handled specially) */
-def('tree', { name: 'Tree', emoji: '🌲', cat: 'nature', tool: 'tree' });
+/* ---------- residential additions ---------- */
+def('rowhouse', {
+  name: 'Row Houses', emoji: '🏘️', cat: 'res', w: 3, h: 2, ex: 14, vars: 3, res: 'block', fams: 2, cars: 1,
+  draw(p, W, H, ex, R, v) {
+    const walls = ['#e6c69c', '#d8e4ef', '#cfe0c2'], roofs = ['#a86f4f', '#7a8fb1', '#8a9a5b'];
+    const wall = walls[v % 3], roof = roofs[v % 3];
+    // two joined narrow houses
+    for (const x0 of [0, W >> 1]) {
+      p.rect(x0 + 1, 12, (W >> 1) - 2, H - 13, wall); p.fr(x0 + 1, 12, (W >> 1) - 2, H - 13, shade(wall, -0.5));
+      p.rect(x0, 2, (W >> 1), 11, roof); p.fr(x0, 2, (W >> 1), 11, shade(roof, -0.4));
+      p.win(x0 + 4, 16, 4, 5); p.win(x0 + 15, 16, 4, 5);
+      p.rect(x0 + 9, H - 9, 6, 8, '#7a5233'); p.fr(x0 + 9, H - 9, 6, 8, shade(wall, -0.55));
+    }
+    p.rect(6, 0, 3, 5, '#9a9089'); p.rect(W - 10, 0, 3, 5, '#9a9089'); // chimneys
+  }
+});
+def('mansion', {
+  name: 'Mansion', emoji: '🏰', cat: 'res', w: 3, h: 3, ex: 22, vars: 2, res: 'family', cars: 2, rich: true,
+  draw(p, W, H, ex, R, v) {
+    const wall = v ? '#efe6d2' : '#e4dced', roof = v ? '#6d5b8e' : '#4f6d8e';
+    baseBld(p, W, H, ex, R, { wall, roof, style: 'gable', wallH: 24, door: 'arch', winW: 4, winH: 6 });
+    // two wings with their own roofs
+    for (const x0 of [2, W - 14]) {
+      p.rect(x0, 8, 12, H - 9, wall); p.fr(x0, 8, 12, H - 9, shade(wall, -0.5));
+      p.rect(x0 - 1, 4, 14, 5, roof); p.fr(x0 - 1, 4, 14, 5, shade(roof, -0.4));
+      p.win(x0 + 3, 12, 4, 5); p.win(x0 + 3, 22, 4, 5);
+    }
+    p.rect((W >> 1) - 6, H - 9, 3, 8, '#d8d2c2'); p.rect((W >> 1) + 4, H - 9, 3, 8, '#d8d2c2'); // porch columns
+    p.rect(2, H - 4, 4, 3, '#7fae5c'); p.rect(W - 6, H - 4, 4, 3, '#7fae5c'); // hedges
+    p.disc(8, H - 6, 2, '#6db4e8'); // tiny fountain
+  }
+});
+
+/* ---------- new industry ---------- */
+def('steelworks', {
+  name: 'Steelworks', emoji: '⚙️', cat: 'work', w: 5, h: 3, ex: 18, jobs: 22, hours: { s: 360, e: 1080 }, smoke: true,
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#8a8478', roof: '#5f5b52', style: 'flat', door: 'garage', winW: 6, winH: 4 });
+    p.rect(4, 0, 6, 16, '#7a6a5a'); p.fr(4, 0, 6, 16, '#55483c'); p.hl(4, 2, 6, '#c65f4e'); // big stack
+    p.rect(14, 3, 5, 13, '#7a6a5a'); p.fr(14, 3, 5, 13, '#55483c');
+    p.rect(W - 26, 6, 20, 8, '#6e6a62'); p.fr(W - 26, 6, 20, 8, '#4a463e'); // gantry
+    p.win(W - 22, 8, 4, 4); p.win(W - 14, 8, 4, 4);
+    p.rect(W - 10, H - 8, 7, 5, '#c8845a'); p.hl(W - 9, H - 7, 5, '#e0a070'); // ore pile
+  }
+});
+def('sawmill', {
+  name: 'Sawmill', emoji: '🪵', cat: 'work', w: 4, h: 3, ex: 12, jobs: 10, hours: { s: 400, e: 1020 },
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#b89a6e', roof: '#7a5c38', style: 'gable', door: 'garage', winW: 4, winH: 4 });
+    // log pile
+    for (let i = 0; i < 4; i++) p.disc(6 + i * 5, H - 5, 2, i % 2 ? '#a5824f' : '#8a6a3f');
+    for (let i = 0; i < 3; i++) p.disc(8 + i * 5, H - 8, 2, '#b8905a');
+    p.disc(W - 10, 10, 5, '#9aa0a8'); p.disc(W - 10, 10, 2, '#6e727a'); // saw blade
+    for (let a = 0; a < 8; a++) p.px(W - 10 + Math.round(Math.cos(a * 0.785) * 5), 10 + Math.round(Math.sin(a * 0.785) * 5), '#d8dce2');
+  }
+});
+def('brickworks', {
+  name: 'Brickworks', emoji: '🧱', cat: 'work', w: 3, h: 3, ex: 14, jobs: 8, hours: { s: 400, e: 1000 }, smoke: true,
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#b8746a', roof: '#8a4a42', style: 'flat', door: 'garage', winW: 4, winH: 4 });
+    p.rect(W - 12, 0, 5, 15, '#a05a50'); p.fr(W - 12, 0, 5, 15, '#6e3a34'); // kiln chimney
+    for (let i = 0; i < 3; i++) { p.rect(4 + i * 3, H - 6 - i * 3, 10, 3, '#c05f4f'); p.fr(4 + i * 3, H - 6 - i * 3, 10, 3, '#8a3f35'); } // brick stacks
+  }
+});
+def('textilemill', {
+  name: 'Textile Mill', emoji: '🧶', cat: 'work', w: 4, h: 3, ex: 16, jobs: 14, hours: { s: 420, e: 1020 },
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#c0958a', roof: '#7e5a52', style: 'flat', winW: 4, winH: 6 });
+    for (let x = 5; x < W - 8; x += 9) p.win(x, 4, 4, 6); // upper window row
+    p.rect(2, 14, W - 4, 1, '#8a625a');
+    p.rect(W - 9, H - 7, 6, 5, '#e0c0d8'); p.rect(W - 8, H - 9, 4, 2, '#c098b8'); // cloth bales
+  }
+});
+def('cannery', {
+  name: 'Cannery', emoji: '🥫', cat: 'work', w: 3, h: 3, ex: 12, jobs: 10, hours: { s: 420, e: 1020 },
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#a8b8b0', roof: '#6e7e76', style: 'flat', door: 'garage', winW: 5, winH: 4, sign: { c: '#4f8e6e', txt: 4 } });
+    for (let i = 0; i < 3; i++) { p.rect(4 + i * 4, 3, 3, 5, '#c8ccd4'); p.hl(4 + i * 4, 4, 3, '#e05a5a'); } // cans on roof sign
+  }
+});
+def('glassworks', {
+  name: 'Glassworks', emoji: '🫙', cat: 'work', w: 3, h: 3, ex: 14, jobs: 8, hours: { s: 400, e: 1000 }, smoke: true,
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#9aa8b8', roof: '#5f6d7e', style: 'flat', door: 'garage', winW: 4, winH: 5 });
+    p.rect((W >> 1) - 4, 0, 8, 12, '#8a7264'); p.fr((W >> 1) - 4, 0, 8, 12, '#5f4c40'); // furnace cone
+    p.rect((W >> 1) - 2, 8, 4, 3, '#ffb050'); p.px((W >> 1) - 1, 9, '#ffd870'); // glow
+    p.windows.push([(W >> 1) - 2, 8, 4, 3]);
+  }
+});
+def('warehouse', {
+  name: 'Warehouse', emoji: '📦', cat: 'work', w: 4, h: 3, ex: 12, jobs: 6, hours: { s: 360, e: 1200 }, wkd: true,
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#9aa0a8', roof: '#6e747c', style: 'flat', door: 'garage', noWin: true });
+    p.rect(4, H - 12, 8, 11, '#c8ccd2'); p.fr(4, H - 12, 8, 11, '#6e747c'); // second bay
+    for (let y = H - 10; y < H - 2; y += 2) p.hl(5, y, 6, '#9aa0a8');
+    p.rect(W - 12, H - 6, 5, 5, '#c8845a'); p.rect(W - 16, H - 4, 4, 3, '#a5824f'); // crates
+  }
+});
+def('powerplant', {
+  name: 'Power Plant', emoji: '⚡', cat: 'work', w: 4, h: 4, ex: 22, jobs: 10, hours: { s: 0, e: 1440 }, wkd: true, smoke: true,
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#a8a49c', roof: '#6e6a62', style: 'flat', door: 'garage', winW: 5, winH: 4 });
+    // cooling towers
+    for (const x0 of [6, 24]) {
+      p.rect(x0, 2, 12, 18, '#c4c0b8'); p.fr(x0, 2, 12, 18, '#8a867e');
+      p.rect(x0 + 1, 2, 10, 2, '#d8d4cc');
+      p.vl(x0 + 2, 4, 14, '#b0aca4'); p.vl(x0 + 9, 4, 14, '#b0aca4');
+    }
+    p.rect(W - 14, H - 14, 10, 8, '#e8c840'); p.fr(W - 14, H - 14, 10, 8, '#a8882a'); // transformer
+    p.px(W - 10, H - 12, '#3c3c3c'); p.vl(W - 6, H - 20, 7, '#5a5e66'); // pylon
+  }
+});
+
+/* ---------- new shops & services (villager businesses) ---------- */
+def('deptstore', {
+  name: 'Departmental Store', emoji: '🏬', cat: 'shop', w: 4, h: 3, ex: 26, jobs: 18, hours: { s: 540, e: 1290 }, wkd: true, visit: 'shop',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#d8ccc0', roof: '#8a7e72', style: 'tower', winW: 6, winH: 5 });
+    p.rect(4, 2, W - 8, 5, '#c05fa8'); p.fr(4, 2, W - 8, 5, '#8a3f78'); // rooftop sign
+    for (let i = 0; i < 5; i++) p.rect(7 + i * 8, 4, 4, 2, '#fff0f8');
+    p.rect(3, H - 13, W - 6, 2, '#c05fa8'); // awning band
+  }
+});
+def('pharmacy', {
+  name: 'Pharmacy', emoji: '💊', cat: 'shop', w: 2, h: 2, ex: 8, jobs: 3, hours: { s: 480, e: 1260 }, wkd: true, visit: 'shop',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#eef0f2', roof: '#c8ced6', style: 'flat', door: 'glass', sign: { c: '#3fae5c', txt: 4 } });
+    p.rect(3, 1, 6, 6, '#f2f4f6'); p.fr(3, 1, 6, 6, '#3fae5c');
+    p.rect(5, 2, 2, 4, '#3fae5c'); p.rect(4, 3, 4, 2, '#3fae5c'); // green cross
+  }
+});
+def('barber', {
+  name: 'Barber Shop', emoji: '💈', cat: 'shop', w: 2, h: 2, ex: 8, jobs: 2, hours: { s: 540, e: 1140 }, wkd: true, visit: 'shop',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#e4e0d4', roof: '#4f6d8e', style: 'gable', door: 'glass', sign: { c: '#4f6d8e', txt: 3 } });
+    p.rect(2, H - 13, 3, 9, '#f2f4f6'); p.fr(2, H - 13, 3, 9, '#8a8f96'); // barber pole
+    for (let y = H - 12; y < H - 5; y += 3) { p.hl(3, y, 1, '#e05a5a'); p.hl(3, y + 1, 1, '#4f9ed0'); }
+  }
+});
+def('florist', {
+  name: 'Florist', emoji: '🌸', cat: 'shop', w: 2, h: 2, ex: 8, jobs: 2, hours: { s: 480, e: 1140 }, wkd: true, visit: 'shop',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#e8e4d0', roof: '#5fae62', style: 'gable', door: 'wood', awning: ['#5fae62', '#f5f1e4'], sign: { c: '#5fae62', txt: 3 } });
+    for (let i = 0; i < 5; i++) p.px(2 + i * 2, H - 3, ['#f2b8cc', '#f2d94f', '#e0704f', '#c8a0e0', '#ffffff'][i]); // flower buckets
+    p.rect(1, H - 2, 11, 1, '#8a6a45');
+  }
+});
+def('bookshop', {
+  name: 'Bookshop', emoji: '📖', cat: 'shop', w: 2, h: 2, ex: 8, jobs: 2, hours: { s: 540, e: 1140 }, visit: 'shop',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#d8c8ac', roof: '#6d5b8e', style: 'gable', door: 'wood', sign: { c: '#6d5b8e', txt: 4 } });
+    p.rect(3, H - 9, 2, 5, '#c0574f'); p.rect(5, H - 8, 2, 4, '#4f9ed0'); p.rect(7, H - 9, 2, 5, '#8a9a5b'); // books in window
+  }
+});
+def('butcher', {
+  name: 'Butcher', emoji: '🥩', cat: 'shop', w: 2, h: 2, ex: 8, jobs: 3, hours: { s: 420, e: 1080 }, visit: 'shop',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#e8ded2', roof: '#a8443c', style: 'gable', door: 'glass', awning: ['#c0574f', '#f5eede'], sign: { c: '#a8443c', txt: 4 } });
+  }
+});
+def('tailor', {
+  name: 'Tailor', emoji: '🧵', cat: 'shop', w: 2, h: 2, ex: 8, jobs: 2, hours: { s: 540, e: 1140 }, visit: 'shop',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#d4cce0', roof: '#7c5f8e', style: 'gable', door: 'wood', sign: { c: '#7c5f8e', txt: 3 } });
+    p.rect(3, H - 10, 4, 6, '#c8ccd4'); p.px(5, H - 11, '#8a8f96'); // dress form
+  }
+});
+def('electronics', {
+  name: 'Electronics Store', emoji: '📺', cat: 'shop', w: 2, h: 2, ex: 10, jobs: 4, hours: { s: 570, e: 1200 }, wkd: true, visit: 'shop',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#5a6474', roof: '#3f4652', style: 'flat', door: 'glass', sign: { c: '#4f9ed0', txt: 5 } });
+    p.rect(3, H - 12, 7, 5, '#9cc4dc'); p.fr(3, H - 12, 7, 5, '#26282e'); // display TV
+    p.rect(4, H - 11, 5, 3, '#4fc0b0');
+    p.windows.push([3, H - 12, 7, 5]);
+  }
+});
+def('toyshop', {
+  name: 'Toy Shop', emoji: '🧸', cat: 'shop', w: 2, h: 2, ex: 8, jobs: 2, hours: { s: 540, e: 1140 }, wkd: true, visit: 'shop',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#f4e4c8', roof: '#e08a3c', style: 'gable', door: 'glass', awning: ['#e05a5a', '#f2c14f'], sign: { c: '#e05a5a', txt: 3 } });
+    p.px(3, H - 6, '#4f9ed0'); p.px(5, H - 5, '#e05a5a'); p.px(7, H - 6, '#5fae62'); // balls in window
+  }
+});
+def('jeweler', {
+  name: 'Jeweler', emoji: '💍', cat: 'shop', w: 2, h: 2, ex: 8, jobs: 2, hours: { s: 600, e: 1080 }, visit: 'shop',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#3f4350', roof: '#26282e', style: 'flat', door: 'glass', sign: { c: '#c8a84f', txt: 3 } });
+    p.px(W >> 1, H - 10, '#bfe8f2'); p.px((W >> 1) - 1, H - 9, '#7fd0e8'); p.px((W >> 1) + 1, H - 9, '#7fd0e8'); // gem
+    p.windows.push([(W >> 1) - 1, H - 10, 3, 2]);
+  }
+});
+def('petshop', {
+  name: 'Pet Shop', emoji: '🐾', cat: 'shop', w: 2, h: 2, ex: 8, jobs: 2, hours: { s: 540, e: 1140 }, wkd: true, visit: 'shop',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#e6d2b8', roof: '#8a9a5b', style: 'gable', door: 'glass', sign: { c: '#8a9a5b', txt: 3 } });
+    p.px(3, H - 5, '#a4783c'); p.px(4, H - 6, '#a4783c'); p.px(8, H - 5, '#6e665f'); // pets by the door
+  }
+});
+def('hardware', {
+  name: 'Hardware Store', emoji: '🔨', cat: 'shop', w: 3, h: 2, ex: 10, jobs: 4, hours: { s: 450, e: 1140 }, wkd: true, visit: 'shop',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#c8b494', roof: '#8a6a3f', style: 'flat', door: 'garage', sign: { c: '#e08a3c', txt: 5 } });
+    p.rect(3, H - 7, 5, 6, '#a5824f'); p.rect(4, H - 9, 3, 2, '#8a8f96'); // lumber + tools
+  }
+});
+def('furniture', {
+  name: 'Furniture Store', emoji: '🛋️', cat: 'shop', w: 3, h: 2, ex: 12, jobs: 5, hours: { s: 540, e: 1140 }, visit: 'shop',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#d8ccb8', roof: '#7a6a52', style: 'flat', door: 'glass', winW: 8, winH: 7, sign: { c: '#a8724f', txt: 5 } });
+    p.rect(5, H - 8, 7, 3, '#c05fa8'); p.rect(5, H - 10, 2, 2, '#c05fa8'); // sofa in window
+  }
+});
+def('icecream', {
+  name: 'Ice-cream Parlor', emoji: '🍦', cat: 'shop', w: 2, h: 2, ex: 10, jobs: 2, hours: { s: 600, e: 1290 }, wkd: true, visit: 'leisure',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#f4e8ec', roof: '#e8a0b8', style: 'gable', door: 'glass', awning: ['#e8a0b8', '#f8f4f0'], sign: { c: '#e8a0b8', txt: 3 } });
+    p.rect((W >> 1) - 1, 0, 3, 5, '#f8f0dc'); p.px(W >> 1, 0, '#e05a5a'); // cone on roof
+    p.disc(W >> 1, 2, 2, '#f2d0dc');
+  }
+});
+def('pizzeria', {
+  name: 'Pizzeria', emoji: '🍕', cat: 'shop', w: 2, h: 2, ex: 8, jobs: 4, hours: { s: 660, e: 1410 }, wkd: true, visit: 'leisure',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#f2e0c0', roof: '#3fae5c', style: 'gable', door: 'wood', awning: ['#3fae5c', '#e05a5a'], sign: { c: '#e05a5a', txt: 3 } });
+    p.disc(4, H - 6, 2, '#f2c14f'); p.px(4, H - 6, '#e05a5a'); // pizza sign
+  }
+});
+def('arcade', {
+  name: 'Arcade', emoji: '🕹️', cat: 'shop', w: 2, h: 2, ex: 12, jobs: 3, hours: { s: 720, e: 1410 }, wkd: true, visit: 'leisure',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#3f3a52', roof: '#2a2638', style: 'flat', door: 'glass', noWin: true });
+    p.rect(3, 2, W - 6, 6, '#5a4a8a'); p.fr(3, 2, W - 6, 6, '#c05fa8'); // neon marquee
+    for (let x = 5; x < W - 5; x += 3) p.px(x, 4, ['#ff70c0', '#70e0ff', '#f2e84f'][x % 3]);
+    p.rect(3, H - 11, 4, 7, '#4f4468'); p.win(4, H - 10, 2, 3); // cabinet glow
+    p.rect(W - 7, H - 11, 4, 7, '#4f4468'); p.win(W - 6, H - 10, 2, 3);
+  }
+});
+def('laundry', {
+  name: 'Laundromat', emoji: '🧺', cat: 'shop', w: 2, h: 2, ex: 8, jobs: 2, hours: { s: 420, e: 1290 }, wkd: true, visit: 'shop',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#cfe0e8', roof: '#7e98a8', style: 'flat', door: 'glass', sign: { c: '#4f9ed0', txt: 4 } });
+    p.disc(4, H - 8, 2, '#eef4f8'); p.disc(4, H - 8, 1, '#9cc4dc'); // porthole washer
+    p.disc(9, H - 8, 2, '#eef4f8'); p.disc(9, H - 8, 1, '#9cc4dc');
+  }
+});
+def('autoshop', {
+  name: 'Auto Garage', emoji: '🔧', cat: 'shop', w: 3, h: 2, ex: 10, jobs: 4, hours: { s: 480, e: 1080 }, visit: 'shop',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#b0b4bc', roof: '#6e727a', style: 'flat', door: 'garage', sign: { c: '#e08a3c', txt: 4 } });
+    p.rect(4, H - 8, 10, 4, '#4f9ed0'); p.fr(4, H - 8, 10, 4, '#26282e'); // car on lift
+    p.rect(2, H - 4, 14, 1, '#8a8f96');
+    p.disc(W - 6, H - 6, 2, '#26282e'); p.disc(W - 6, H - 6, 1, '#4a4f58'); // spare tyre
+  }
+});
+def('postoffice', {
+  name: 'Post Office', emoji: '📮', cat: 'civic', w: 2, h: 2, ex: 10, jobs: 4, hours: { s: 480, e: 1050 },
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#e2d8c4', roof: '#c0574f', style: 'gable', door: 'wood', sign: { c: '#c0574f', txt: 4 } });
+    p.rect(2, H - 8, 3, 6, '#e05a5a'); p.fr(2, H - 8, 3, 6, '#8a3535'); p.hl(3, H - 7, 1, '#26282e'); // postbox
+  }
+});
+
+/* ---------- transport ---------- */
+def('busstop', {
+  name: 'Bus Stop', emoji: '🚏', cat: 'transport', w: 1, h: 1, ex: 8,
+  draw(p, W, H, ex, R) {
+    p.rect(1, H - 3, W - 2, 2, '#b8b2a2'); // paved base
+    p.rect(2, 2, 12, 3, '#7ba8c8'); p.fr(2, 2, 12, 3, '#4a7492'); // glass roof
+    p.vl(3, 5, H - 8, '#6e727a'); p.vl(12, 5, H - 8, '#6e727a');
+    p.rect(4, H - 8, 8, 2, '#a5824f'); // bench
+    p.rect(13, 0, 3, 4, '#e8b93c'); p.fr(13, 0, 3, 4, '#a8842a'); p.vl(14, 4, H - 6, '#6e727a'); // sign
+  }
+});
+def('taxistand', {
+  name: 'Taxi Stand', emoji: '🚕', cat: 'transport', w: 1, h: 1, ex: 8, jobs: 3, hours: { s: 0, e: 1440 }, wkd: true,
+  draw(p, W, H, ex, R) {
+    p.rect(0, H - 4, W, 3, '#8a8e96'); p.hl(0, H - 4, W, '#f2c14f'); // rank markings
+    p.rect(1, 0, 8, 4, '#f2c14f'); p.fr(1, 0, 8, 4, '#a8842a'); // TAXI sign
+    p.px(3, 1, '#26282e'); p.px(5, 1, '#26282e'); p.px(7, 1, '#26282e');
+    p.vl(4, 4, H - 8, '#6e727a');
+    p.rect(9, H - 8, 6, 4, '#f2c14f'); p.fr(9, H - 8, 6, 4, '#a8842a'); p.px(10, H - 7, '#26282e'); // waiting cab
+  }
+});
+def('trainstation', {
+  name: 'Train Station', emoji: '🚉', cat: 'transport', w: 4, h: 2, ex: 14, jobs: 8, hours: { s: 300, e: 1380 }, wkd: true,
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#d8c4a4', roof: '#8a5a4a', style: 'gable', door: 'arch', winW: 4, winH: 5 });
+    p.disc(W >> 1, 6, 3, '#f2ede0'); p.px(W >> 1, 6, '#4a4a4a'); p.vl(W >> 1, 4, 2, '#4a4a4a'); // clock
+    p.rect(0, H - 5, W, 2, '#b0aa98'); // platform edge
+    for (let x = 2; x < W; x += 10) p.vl(x, H - 10, 6, '#6e727a'); // canopy poles
+    p.rect(0, H - 11, W, 2, '#7a8288');
+  }
+});
+def('dock', {
+  name: 'Dock', emoji: '⚓', cat: 'transport', w: 3, h: 2, ex: 8, jobs: 6, hours: { s: 360, e: 1140 }, wkd: true, needsWater: true,
+  draw(p, W, H, ex, R) {
+    p.rect(0, 6, W, H - 6, '#b08c58'); p.fr(0, 6, W, H - 6, '#7a5c38'); // planked wharf
+    for (let x = 4; x < W; x += 5) p.vl(x, 7, H - 8, '#96703f');
+    p.rect(3, 0, 12, 9, '#8a6a45'); p.fr(3, 0, 12, 9, '#5d4630'); p.rect(5, 2, 3, 3, '#c8dce8'); // boathouse
+    p.rect(W - 14, 8, 6, 5, '#c8845a'); p.rect(W - 20, 10, 5, 4, '#a5824f'); // crates
+    p.vl(W - 5, 0, 12, '#6e6a62'); p.hl(W - 12, 2, 8, '#6e6a62'); p.vl(W - 12, 2, 4, '#8a8e96'); // crane
+    p.disc(2, H - 3, 1, '#3c4048'); p.disc(W - 3, H - 3, 1, '#3c4048'); // bollards
+  }
+});
+def('heliport', {
+  name: 'Heliport', emoji: '🚁', cat: 'transport', w: 3, h: 3, ex: 10, jobs: 4, hours: { s: 360, e: 1260 }, wkd: true,
+  draw(p, W, H, ex, R) {
+    p.rect(0, ex, W, H - ex, '#8a8e96'); p.fr(0, ex, W, H - ex, '#5f636b'); // apron
+    p.disc(W >> 1, (H + ex) >> 1, 15, '#6e727a'); p.disc(W >> 1, (H + ex) >> 1, 13, '#7e828a');
+    p.g.strokeStyle = '#f2ede0'; p.g.lineWidth = 1.5;
+    p.g.beginPath(); p.g.arc(W >> 1, (H + ex) >> 1, 12, 0, 7); p.g.stroke();
+    p.rect((W >> 1) - 4, ((H + ex) >> 1) - 5, 3, 11, '#f2ede0'); // big H
+    p.rect((W >> 1) + 2, ((H + ex) >> 1) - 5, 3, 11, '#f2ede0');
+    p.rect((W >> 1) - 2, ((H + ex) >> 1) - 1, 5, 3, '#f2ede0');
+    p.rect(1, 0, 10, 12, '#c8ced6'); p.fr(1, 0, 10, 12, '#7e848c'); p.win(3, 2, 6, 4); // control hut
+    p.vl(W - 4, 0, 8, '#8a8f96'); p.rect(W - 3, 0, 4, 2, '#e08a3c'); // windsock
+  }
+});
+
+/* ---------- big leisure ---------- */
+def('grandpark', {
+  name: 'Grand Park', emoji: '🏞️', cat: 'leisure', w: 5, h: 4, ex: 8, hours: { s: 330, e: 1350 }, wkd: true, visit: 'leisure', noroof: true,
+  draw(p, W, H, ex, R) {
+    p.rect(0, ex, W, H - ex, '#85bb62'); p.dither(0, ex, W, H - ex, '#75ab52', 0.22, R);
+    p.fr(0, ex, W, H - ex, '#6a9c4a');
+    // winding path
+    p.g.strokeStyle = '#d8cba0'; p.g.lineWidth = 3;
+    p.g.beginPath(); p.g.moveTo(2, H - 8);
+    p.g.quadraticCurveTo(W * 0.3, H * 0.55, W * 0.55, H * 0.62);
+    p.g.quadraticCurveTo(W * 0.85, H * 0.7, W - 2, ex + 10); p.g.stroke();
+    // pond
+    p.g.fillStyle = '#6db4e8'; p.g.beginPath(); p.g.ellipse(W * 0.72, H * 0.42, 13, 8, 0, 0, 7); p.g.fill();
+    p.g.strokeStyle = '#4f94c8'; p.g.stroke();
+    p.px(W * 0.7, H * 0.4, '#eaf6ff');
+    // bandstand
+    p.disc(14, ex + 14, 7, '#e8dcc8'); p.disc(14, ex + 12, 6, '#c0574f'); p.px(14, ex + 7, '#f2c14f');
+    // trees
+    const tr = (x, y) => { p.disc(x, y, 4, '#5f9648'); p.disc(x - 1, y - 1, 3, '#74ab58'); p.px(x, y + 4, '#6b4a2f'); };
+    tr(6, H - 14); tr(W - 8, H - 10); tr(W * 0.45, ex + 8); tr(W - 12, ex + 12); tr(8, ex + 26);
+    // picnic blankets with baskets
+    for (const [bx, by, c] of [[26, H - 16, '#e05a5a'], [40, H - 24, '#4f9ed0'], [54, H - 12, '#f2c14f']]) {
+      p.rect(bx, by, 8, 6, c); p.fr(bx, by, 8, 6, shade(c, -0.3));
+      p.hl(bx + 1, by + 2, 6, '#f5f1e4'); p.px(bx + 6, by + 1, '#8a6a45');
+    }
+    // flower beds
+    for (let i = 0; i < 14; i++) p.px(3 + Math.floor(R() * (W - 6)), ex + 3 + Math.floor(R() * (H - ex - 6)), ['#f2d94f', '#f298b8', '#ffffff', '#e0704f'][i % 4]);
+    p.rect(5, H * 0.55, 6, 2, '#8a6a45'); p.rect(W - 14, H * 0.5, 6, 2, '#8a6a45'); // benches
+  }
+});
+def('plaza', {
+  name: 'Town Plaza', emoji: '⛲', cat: 'leisure', w: 3, h: 3, ex: 4, hours: { s: 300, e: 1440 }, wkd: true, visit: 'leisure', noroof: true,
+  draw(p, W, H, ex, R) {
+    p.rect(0, ex, W, H - ex, '#cfc6b2'); p.fr(0, ex, W, H - ex, '#a89e88');
+    for (let y = ex + 4; y < H; y += 5) p.hl(0, y, W, '#bcb29c');
+    for (let x = 4; x < W; x += 5) p.vl(x, ex, H - ex, '#bcb29c');
+    p.disc(W >> 1, (H + ex) >> 1, 7, '#9ab0b8'); p.disc(W >> 1, (H + ex) >> 1, 5, '#6db4e8'); // fountain
+    p.px(W >> 1, ((H + ex) >> 1) - 2, '#eaf6ff'); p.px((W >> 1) + 2, (H + ex) >> 1, '#eaf6ff');
+    p.rect(4, ex + 3, 6, 2, '#8a6a45'); p.rect(W - 10, H - 5, 6, 2, '#8a6a45'); // benches
+    p.vl(3, ex + 8, 6, '#3c4048'); p.px(3, ex + 7, '#ffd88a'); // plaza lamps
+    p.vl(W - 4, ex + 8, 6, '#3c4048'); p.px(W - 4, ex + 7, '#ffd88a');
+  }
+});
+def('zoo', {
+  name: 'Zoo', emoji: '🦁', cat: 'leisure', w: 5, h: 4, ex: 10, jobs: 8, hours: { s: 540, e: 1080 }, wkd: true, visit: 'leisure', noroof: true,
+  draw(p, W, H, ex, R) {
+    p.rect(0, ex, W, H - ex, '#9cba74'); p.dither(0, ex, W, H - ex, '#8aa862', 0.2, R);
+    p.fr(0, ex, W, H - ex, '#6a9c4a'); p.fr(1, ex + 1, W - 2, H - ex - 2, '#8a6a45'); // wooden fence
+    // entrance arch
+    p.rect((W >> 1) - 8, 0, 16, 6, '#c0574f'); p.fr((W >> 1) - 8, 0, 16, 6, '#8a3535');
+    for (let i = 0; i < 3; i++) p.rect((W >> 1) - 5 + i * 4, 2, 2, 2, '#fffbe8');
+    p.vl((W >> 1) - 8, 6, ex - 4, '#8a6a45'); p.vl((W >> 1) + 7, 6, ex - 4, '#8a6a45');
+    // pens
+    const pen = (x, y, w2, h2) => { p.fr(x, y, w2, h2, '#8a6a45'); p.dither(x + 1, y + 1, w2 - 2, h2 - 2, '#c9b877', 0.3, R); };
+    pen(4, ex + 4, 22, 14); pen(W - 28, ex + 4, 24, 14); pen(4, H - 18, 22, 14); pen(W - 28, H - 18, 24, 14);
+    // animals: lion, elephant, flamingos, bear
+    p.rect(10, ex + 10, 6, 3, '#d8a050'); p.rect(15, ex + 8, 3, 3, '#c08a3c'); p.px(17, ex + 9, '#8a5a2c'); // lion
+    p.rect(W - 22, ex + 8, 9, 5, '#9aa0a8'); p.rect(W - 24, ex + 9, 3, 5, '#8a9098'); p.px(W - 24, ex + 13, '#8a9098'); // elephant
+    p.px(10, H - 12, '#f298b8'); p.vl(10, H - 11, 3, '#e880a8'); p.px(14, H - 13, '#f298b8'); p.vl(14, H - 12, 3, '#e880a8'); // flamingos
+    p.disc(12, H - 10, 3, '#6db4e8'); // their pool
+    p.rect(W - 20, H - 13, 6, 5, '#6e5a4a'); p.rect(W - 15, H - 15, 3, 3, '#5d4630'); // bear
+  }
+});
 def('forest', { name: 'Forest', emoji: '🌲', cat: 'nature', tool: 'forest' });
 def('pond', { name: 'Pond', emoji: '💧', cat: 'nature', tool: 'pond' });
 def('lake', { name: 'Lake', emoji: '🌊', cat: 'nature', tool: 'lake' });
 def('river', { name: 'River', emoji: '🏞️', cat: 'nature', tool: 'river', drag: true });
 def('mountain', { name: 'Mountain', emoji: '⛰️', cat: 'nature', tool: 'mountain' });
 def('road', { name: 'Road', emoji: '🛣️', cat: 'tool', tool: 'road', drag: true });
+def('rail', { name: 'Railway', emoji: '🛤️', cat: 'transport', tool: 'rail', drag: true });
 def('bulldoze', { name: 'Bulldoze', emoji: '🚜', cat: 'tool', tool: 'bulldoze', drag: true });
 
 /* ============================================================
@@ -592,6 +976,7 @@ const SPR = {
     this.makeRoads(); this.makeBridges(); this.makeMountains(); this.makeCars();
     this.makeGlow(); this.makeLamp(); this.makePuddles(); this.makePolice();
     this.makeCritters(); this.makeUmbrellas(); this.makeDecor();
+    this.makeRails(); this.makeTransit(); this.makeCivicProps();
     for (const key in CAT) {
       const d = CAT[key];
       if (!d.draw) continue;
@@ -1097,6 +1482,143 @@ const SPR = {
       return { h, v: p.c };
     };
     this.policeCar = [mk2(false), mk2(true)];
+  },
+
+  /* ---------- railway tiles: ballast bed + steel rails per mask ---------- */
+  makeRails() {
+    this.rails = []; this.railsBare = [];
+    const BAL = '#9a9484', SLP = '#7a5c38', STL = '#c0c6ce', STD = '#8a9098';
+    for (let m = 0; m < 16; m++) {
+      for (const bare of [false, true]) {
+        const p = new P(T, T);
+        if (!bare) {
+          p.rect(0, 3, T, T - 6, BAL);
+          p.dither(0, 3, T, T - 6, '#8a8474', 0.25, mulberry32(5000 + m));
+        }
+        const n = m & 1, e = m & 2, s = m & 4, w = m & 8;
+        const vert = n || s || m === 0;
+        const horz = e || w;
+        if (horz) {
+          for (let x = 1; x < T; x += 4) p.vl(x, 4, T - 8, SLP); // sleepers
+          p.hl(0, 5, T, STL); p.hl(0, 6, T, STD);
+          p.hl(0, 9, T, STL); p.hl(0, 10, T, STD);
+        }
+        if (vert) {
+          for (let y = 1; y < T; y += 4) p.hl(4, y, T - 8, SLP);
+          p.vl(5, 0, T, STL); p.vl(6, 0, T, STD);
+          p.vl(9, 0, T, STL); p.vl(10, 0, T, STD);
+        }
+        (bare ? this.railsBare : this.rails).push(p.c);
+      }
+    }
+  },
+
+  /* ---------- buses, taxis, trains, boats, ferries, helicopters ---------- */
+  makeTransit() {
+    // bus (h + v)
+    let p = new P(16, 8);
+    p.rect(0, 1, 16, 6, '#e0a03c'); p.fr(0, 1, 16, 6, '#8a5f1e');
+    for (let x = 2; x < 13; x += 3) p.rect(x, 2, 2, 2, '#bfe0ef');
+    p.rect(14, 2, 1, 3, '#9cc4dc'); p.px(15, 3, '#fff2b0');
+    p.rect(2, 6, 2, 2, '#2c2c30'); p.rect(11, 6, 2, 2, '#2c2c30');
+    const busH = p.c;
+    p = new P(8, 16);
+    p.rect(1, 0, 6, 16, '#e0a03c'); p.fr(1, 0, 6, 16, '#8a5f1e');
+    for (let y = 2; y < 13; y += 3) p.rect(2, y, 2, 2, '#bfe0ef');
+    p.rect(2, 13, 4, 2, '#9cc4dc');
+    p.rect(0, 2, 1, 2, '#2c2c30'); p.rect(7, 2, 1, 2, '#2c2c30');
+    p.rect(0, 11, 1, 2, '#2c2c30'); p.rect(7, 11, 1, 2, '#2c2c30');
+    this.bus = { h: busH, v: p.c };
+    // taxi (yellow cab with roof sign)
+    p = new P(12, 9);
+    p.rect(0, 3, 12, 4, '#f2c14f'); p.fr(0, 3, 12, 4, '#a8842a');
+    p.rect(3, 2, 6, 2, '#f2c14f'); p.rect(4, 2, 4, 2, '#bfe0ef');
+    p.rect(5, 0, 3, 2, '#26282e'); p.px(6, 0, '#f2c14f'); // TAXI sign
+    p.px(0, 4, '#fff2b0'); p.px(11, 4, '#e88');
+    p.rect(2, 7, 2, 2, '#2c2c30'); p.rect(8, 7, 2, 2, '#2c2c30');
+    const taxiH = p.c;
+    p = new P(9, 12);
+    p.rect(2, 0, 4, 12, '#f2c14f'); p.fr(2, 0, 4, 12, '#a8842a');
+    p.rect(1, 3, 6, 6, '#f2c14f'); p.rect(3, 3, 2, 5, '#bfe0ef');
+    p.rect(3, 5, 2, 2, '#26282e');
+    p.rect(0, 2, 2, 2, '#2c2c30'); p.rect(6, 2, 2, 2, '#2c2c30');
+    p.rect(0, 8, 2, 2, '#2c2c30'); p.rect(6, 8, 2, 2, '#2c2c30');
+    this.taxi = { h: taxiH, v: p.c };
+    // train: engine + coach (h + v)
+    const mkTrain = (col, engine) => {
+      let q = new P(18, 9);
+      q.rect(0, 1, 18, 7, col); q.fr(0, 1, 18, 7, shade(col, -0.5));
+      if (engine) {
+        q.rect(14, 0, 4, 4, shade(col, -0.25)); q.rect(15, 2, 2, 2, '#9cc4dc');
+        q.px(17, 4, '#fff2b0'); q.rect(0, 3, 2, 3, shade(col, -0.35));
+      }
+      for (let x = engine ? 2 : 1; x < (engine ? 12 : 16); x += 4) q.rect(x, 3, 3, 2, '#bfe0ef');
+      q.rect(2, 8, 2, 1, '#2c2c30'); q.rect(8, 8, 2, 1, '#2c2c30'); q.rect(14, 8, 2, 1, '#2c2c30');
+      const h = q.c;
+      q = new P(9, 18);
+      q.rect(1, 0, 7, 18, col); q.fr(1, 0, 7, 18, shade(col, -0.5));
+      if (engine) { q.rect(2, 14, 5, 4, shade(col, -0.25)); q.rect(3, 15, 3, 2, '#9cc4dc'); }
+      for (let y = engine ? 2 : 1; y < (engine ? 12 : 16); y += 4) q.rect(3, y, 3, 2, '#bfe0ef');
+      return { h, v: q.c };
+    };
+    this.trainEngine = mkTrain('#3f6ec0', true);
+    this.trainCoach = mkTrain('#c05f5f', false);
+    // rowboat
+    p = new P(10, 6);
+    p.rect(1, 2, 8, 3, '#a5824f'); p.fr(1, 2, 8, 3, '#6b4a2f');
+    p.px(0, 3, '#6b4a2f'); p.px(9, 3, '#6b4a2f');
+    p.rect(4, 1, 1, 2, '#8a6a45');
+    this.boat = p.c;
+    // ferry / cargo ship
+    p = new P(20, 11);
+    p.rect(1, 5, 18, 5, '#3f5f80'); p.fr(1, 5, 18, 5, '#263a50');
+    p.rect(3, 2, 10, 4, '#eef0f4'); p.fr(3, 2, 10, 4, '#8a9098');
+    for (let x = 4; x < 12; x += 3) p.rect(x, 3, 2, 2, '#9cc4dc');
+    p.rect(14, 3, 3, 3, '#c05f5f'); p.px(15, 1, '#26282e'); p.px(15, 0, '#c8ccd4'); // funnel + smoke
+    p.px(0, 6, '#26282e'); p.px(19, 6, '#26282e');
+    this.ferry = p.c;
+    // helicopter: body + 2 rotor frames
+    p = new P(16, 10);
+    p.rect(2, 3, 8, 5, '#4f8ede'); p.fr(2, 3, 8, 5, '#2c5388');
+    p.rect(7, 4, 3, 3, '#bfe0ef'); // cockpit glass
+    p.rect(10, 4, 5, 2, '#3f6ec0'); p.rect(14, 2, 1, 3, '#3f6ec0'); p.rect(13, 2, 3, 1, '#8aa8c8'); // tail + rotor
+    p.hl(1, 9, 10, '#8a9098'); p.vl(3, 8, 1, '#8a9098'); p.vl(8, 8, 1, '#8a9098'); // skids
+    this.heli = p.c;
+    this.heliRotor = [];
+    p = new P(18, 3); p.hl(0, 1, 18, 'rgba(60,64,72,0.85)'); this.heliRotor.push(p.c);
+    p = new P(18, 3); p.hl(4, 1, 10, 'rgba(60,64,72,0.5)'); p.vl(8, 0, 3, 'rgba(60,64,72,0.5)'); p.vl(10, 0, 3, 'rgba(60,64,72,0.5)'); this.heliRotor.push(p.c);
+  },
+
+  /* ---------- campaign tents, voting booths ---------- */
+  _tents: new Map(),
+  tent(color) {
+    if (this._tents.has(color)) return this._tents.get(color);
+    const p = new P(14, 12);
+    const g = p.g;
+    g.fillStyle = color;
+    g.beginPath(); g.moveTo(7, 0); g.lineTo(0, 9); g.lineTo(14, 9); g.closePath(); g.fill();
+    g.fillStyle = shade(color, 0.35);
+    g.beginPath(); g.moveTo(7, 0); g.lineTo(3, 9); g.lineTo(7, 9); g.closePath(); g.fill();
+    p.rect(0, 9, 14, 2, shade(color, -0.35));
+    p.rect(5, 5, 4, 6, '#2e2a26'); // entrance
+    p.vl(7, 0, 2, '#8a6a45'); p.rect(8, 0, 4, 2, color); // flag
+    this._tents.set(color, p.c);
+    return p.c;
+  },
+  makeCivicProps() {
+    // voting booth
+    let p = new P(10, 13);
+    p.rect(0, 0, 10, 3, '#f2ede0'); p.fr(0, 0, 10, 3, '#a89e88'); // top panel
+    p.rect(1, 3, 8, 9, '#4f6d8e'); p.fr(1, 3, 8, 9, '#2c4058');   // curtain
+    for (let y = 4; y < 11; y += 2) p.vl(3, y, 1, '#3d5a78'), p.vl(6, y, 1, '#3d5a78');
+    p.rect(3, 1, 4, 1, '#3f5f80');
+    this.booth = p.c;
+    // ballot box
+    p = new P(8, 8);
+    p.rect(0, 2, 8, 6, '#e8e4d8'); p.fr(0, 2, 8, 6, '#8a8478');
+    p.rect(2, 0, 4, 3, '#c8ccd4'); p.hl(3, 1, 2, '#26282e'); // slot
+    p.px(3, 4, '#4f6d8e'); p.px(4, 4, '#4f6d8e');
+    this.ballotBox = p.c;
   },
 
   makeCritters() {

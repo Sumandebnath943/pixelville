@@ -134,6 +134,18 @@ function rebuildGround() {
     if ((x * 7 + y * 13) % 7 === 0 && gr !== G_WATER) UI.lampSpots.push([x, y]);
   }
 
+  /* pass 3.5 — railway tracks (ballast on grass, bare rails over level crossings) */
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+    const i = World.idx(x, y);
+    if (!World.railMap[i]) continue;
+    const m = World.railMask(x, y);
+    g.drawImage(World.roadMap[i] ? SPR.railsBare[m] : SPR.rails[m], x * T, y * T);
+    if (World.roadMap[i]) { // level-crossing warning posts
+      g.fillStyle = '#e8e4cf'; g.fillRect(x * T + 1, y * T + 1, 1, 3); g.fillRect(x * T + T - 2, y * T + T - 4, 1, 3);
+      g.fillStyle = '#c65f4e'; g.fillRect(x * T + 1, y * T + 1, 1, 1); g.fillRect(x * T + T - 2, y * T + T - 4, 1, 1);
+    }
+  }
+
   // share terrain info with the ambient-life module
   Life.waterTiles = UI.waterTiles;
   Life.edgeRoads = [];
@@ -244,6 +256,25 @@ function render(now) {
   }
   for (const tr of Life.tourists) if (tr.phase !== 'visit') ents.push({ kind: 'tourist', tr, base: tr.y + 4 });
   for (const dk of Life.ducks) ents.push({ kind: 'duck', dk, base: dk.y + 3 });
+  // public transport & harbour life
+  for (const bus of Life.buses) ents.push({ kind: 'bus', u: bus, base: bus.y + 4 });
+  for (const train of Life.trains) {
+    ents.push({ kind: 'traincar', u: train, off: 0, engine: true, base: train.y + 4 });
+    ents.push({ kind: 'traincar', u: train, off: 1.4, base: train.y + 4.01 });
+    ents.push({ kind: 'traincar', u: train, off: 2.8, base: train.y + 4.02 });
+  }
+  for (const bt of Life.boats) ents.push({ kind: 'boat', u: bt, base: bt.y + 3 });
+  if (Life.ferry) ents.push({ kind: 'ferry', u: Life.ferry, base: Life.ferry.y + 5 });
+  for (const cc of Life.campaignCars) ents.push({ kind: 'campcar', u: cc, base: cc.y + 4 });
+  // campaign camps: tents with volunteers, one per candidate
+  if (typeof Gov !== 'undefined' && Gov.campaign && Gov.campaign.camps)
+    for (const cp of Gov.campaign.camps) ents.push({ kind: 'camp', cp, base: (cp.y + 1) * T });
+  if (Life.votingBooths) ents.push({ kind: 'voting', vb: Life.votingBooths, base: Life.votingBooths.y + 14 });
+  // waiting passengers at bus shelters
+  if (Life.buses.length)
+    for (const b of World.buildings)
+      if (b.type === 'busstop' && b.connected && !b.construction && !b.ruined)
+        ents.push({ kind: 'busqueue', b, base: (b.y + b.h) * T + 1 });
   ents.sort((a, b) => a.base - b.base);
 
   const frame = Math.floor(now / 160) % 2;
@@ -387,8 +418,8 @@ function render(now) {
       }
     } else if (e.kind === 'agent') {
       const p = e.p;
-      if (p.trip.car) {
-        const spr = SPR.car(p.trip.car.seed);
+      if (p.trip.car || p.trip.taxi) {
+        const spr = p.trip.taxi ? SPR.taxi : SPR.car(p.trip.car.seed);
         shadow(p.x, p.y + 3, 6, 2);
         if (p.dirx !== 0) ctx.drawImage(spr.h, Math.round(p.x) - 6, Math.round(p.y) - 4);
         else ctx.drawImage(spr.v, Math.round(p.x) - 4, Math.round(p.y) - 6);
@@ -488,6 +519,88 @@ function render(now) {
       if (tr.dirx !== 0) ctx.drawImage(spr.h, Math.round(tr.x) - 6, Math.round(tr.y) - 4);
       else ctx.drawImage(spr.v, Math.round(tr.x) - 4, Math.round(tr.y) - 6);
       if (dark > 0.1) UI.lights.push({ x: tr.x + (tr.dirx || 0) * 12, y: tr.y + (tr.diry || 0) * 12, r: 15, a: 0.85, tint: 'cool' });
+    } else if (e.kind === 'bus') {
+      const u = e.u;
+      shadow(u.x, u.y + 3, 8, 2.4);
+      if (u.dirx !== 0) ctx.drawImage(SPR.bus.h, Math.round(u.x) - 8, Math.round(u.y) - 4);
+      else ctx.drawImage(SPR.bus.v, Math.round(u.x) - 4, Math.round(u.y) - 8);
+      if (dark > 0.1) UI.lights.push({ x: u.x + (u.dirx || 0) * 12, y: u.y + (u.diry || 0) * 12, r: 15, a: 0.8, tint: 'cool' });
+    } else if (e.kind === 'traincar') {
+      const tr = e.u;
+      const o = { x: tr.x, y: tr.y, dirx: tr.dirx, diry: tr.diry };
+      if (e.off) Life.followPath(o, tr.route, Math.max(0, Math.min(tr.route.length - 1, tr.prog - e.off * tr.dir)), 0);
+      const spr = e.engine ? SPR.trainEngine : SPR.trainCoach;
+      shadow(o.x, o.y + 3, 9, 2.4);
+      if (o.dirx !== 0) ctx.drawImage(spr.h, Math.round(o.x) - 9, Math.round(o.y) - 4);
+      else ctx.drawImage(spr.v, Math.round(o.x) - 4, Math.round(o.y) - 9);
+      if (e.engine && dark > 0.1) UI.lights.push({ x: o.x + (o.dirx || 0) * 14, y: o.y + (o.diry || 0) * 14, r: 20, a: 0.9, tint: 'warm' });
+      if (e.engine && Math.random() < 0.12 && UI.speeds[UI.speedIdx] > 0)
+        UI.smoke.push({ x: o.x, y: o.y - 7, r: 1.4 + Math.random(), life: 0.7 });
+    } else if (e.kind === 'boat') {
+      const u = e.u;
+      ctx.strokeStyle = 'rgba(220,240,252,0.3)';
+      ctx.beginPath(); ctx.ellipse(u.x, u.y + 2, 6 + Math.sin(u.ph) * 1.5, 2.4, 0, 0, 7); ctx.stroke();
+      ctx.save();
+      if (u.flip < 0) { ctx.translate(u.x * 2, 0); ctx.scale(-1, 1); }
+      ctx.drawImage(SPR.boat, Math.round(u.x) - 5, Math.round(u.y) - 3 + (Math.sin(u.ph * 2) > 0 ? 0 : 1));
+      ctx.restore();
+    } else if (e.kind === 'ferry') {
+      const u = e.u;
+      ctx.strokeStyle = 'rgba(220,240,252,0.4)';
+      ctx.beginPath(); ctx.ellipse(u.x, u.y + 3, 11, 3, 0, 0, 7); ctx.stroke();
+      ctx.drawImage(SPR.ferry, Math.round(u.x) - 10, Math.round(u.y) - 6);
+      if (dark > 0.1) UI.lights.push({ x: u.x, y: u.y - 3, r: 14, a: 0.7, tint: 'warm' });
+    } else if (e.kind === 'campcar') {
+      const u = e.u;
+      const cand = Gov.campaign && Gov.campaign.candidates[u.ci % Gov.campaign.candidates.length];
+      const spr = SPR.car(u.seed % 8);
+      shadow(u.x, u.y + 3, 6, 2);
+      if (u.dirx !== 0) ctx.drawImage(spr.h, Math.round(u.x) - 6, Math.round(u.y) - 4);
+      else ctx.drawImage(spr.v, Math.round(u.x) - 4, Math.round(u.y) - 6);
+      // rooftop banner in the candidate's colour
+      ctx.fillStyle = cand ? cand.color : '#4f8ede';
+      ctx.fillRect(Math.round(u.x) - 4, Math.round(u.y) - 9, 9, 3);
+      ctx.fillStyle = 'rgba(255,252,240,0.9)';
+      ctx.fillRect(Math.round(u.x) - 3, Math.round(u.y) - 8, 2, 1); ctx.fillRect(Math.round(u.x) + 1, Math.round(u.y) - 8, 2, 1);
+      if (Math.floor(now / 900) % 3 === 0) {
+        ctx.font = '7px "Segoe UI Emoji", serif';
+        ctx.fillText('📢', Math.round(u.x) + 5, Math.round(u.y) - 9);
+      }
+    } else if (e.kind === 'camp') {
+      const cp = e.cp;
+      const cand = Gov.campaign.candidates[cp.ci % Gov.campaign.candidates.length];
+      const cx = cp.x * T + 1, cy = cp.y * T;
+      shadow(cx + 7, cy + 13, 7, 2);
+      ctx.drawImage(SPR.tent(cand.color || '#4f8ede'), cx, cy + 2);
+      // a volunteer handing out flyers
+      const vs = SPR.person((cp.ci % 2) ? 'woman' : 'man', cp.x * 31 + cp.y);
+      ctx.drawImage(vs.f[Math.floor(now / 500) % 2], cx + 13, cy + 6);
+      if ((Math.floor(now / 1300) + cp.ci) % 3 === 0) {
+        ctx.font = '7px "Segoe UI Emoji", serif';
+        ctx.fillText('📋', cx + 16, cy + 4);
+      }
+      if (dark > 0.15) UI.lights.push({ x: cx + 7, y: cy + 8, r: 16, a: 0.7, tint: 'warm' });
+    } else if (e.kind === 'voting') {
+      const vb = e.vb;
+      // a row of booths + ballot box
+      for (let k = 0; k < 3; k++) ctx.drawImage(SPR.booth, vb.x - 22 + k * 12, vb.y - 8);
+      ctx.drawImage(SPR.ballotBox, vb.x + 16, vb.y - 2);
+      // the queue of voters, shuffling forward
+      const shift = Math.floor(now / 1400) % 2;
+      for (let k = 0; k < vb.queue.length; k++) {
+        const q = vb.queue[k];
+        const spr = SPR.person(q.kind, q.seed);
+        ctx.drawImage(spr.f[(k + shift) % 2], vb.x - 30 - k * 7 + (k % 2), vb.y + 8 - (k % 3));
+      }
+      ctx.font = '8px "Segoe UI Emoji", serif';
+      ctx.fillText('🗳️', vb.x - 4, vb.y - 10);
+    } else if (e.kind === 'busqueue') {
+      const b = e.b;
+      const n = 1 + (b.id + Math.floor(now / 60000)) % 2;
+      for (let k = 0; k < n; k++) {
+        const spr = SPR.person(['man', 'woman', 'kid'][(b.id + k) % 3], b.id * 13 + k * 7);
+        ctx.drawImage(spr.f[0], b.x * T - 4 - k * 6, (b.y + b.h) * T - spr.h - 1);
+      }
     } else if (e.kind === 'duck') {
       const dk = e.dk;
       const bob = Math.sin(dk.ph) > 0 ? 0 : 1;
@@ -620,6 +733,17 @@ function render(now) {
   for (const bl of Life.balloons) {
     const by = bl.y + Math.sin(bl.ph) * 4;
     ctx.drawImage(SPR.balloon, Math.round(bl.x), Math.round(by));
+  }
+  // helicopters — rotor thump, ground shadow shrinking with altitude
+  for (const h of Life.helis) {
+    ctx.globalAlpha = 0.16 * Math.max(0.25, 1 - h.alt / 60);
+    ctx.fillStyle = '#0a1410';
+    ctx.beginPath(); ctx.ellipse(h.x, h.y + 5, 8 * Math.max(0.5, 1 - h.alt / 90), 2.6, 0, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+    const hy = h.y - h.alt;
+    ctx.drawImage(SPR.heli, Math.round(h.x) - 8, Math.round(hy) - 5);
+    ctx.drawImage(SPR.heliRotor[Math.floor(now / 70) % 2], Math.round(h.x) - 10, Math.round(hy) - 8);
+    if (dark > 0.12) UI.lights.push({ x: h.x, y: hy, r: 14, a: 0.8, tint: 'red' });
   }
 
   /* ---- screen-space: dusk tint, darkness, emissive, precip ---- */
@@ -806,11 +930,11 @@ function drawGhost() {
     if (d.tool === 'lake') { ctx.fillStyle = '#57a5e8'; ctx.beginPath(); ctx.ellipse(x * T + 8, y * T + 8, 4.5 * T, 3.2 * T, 0, 0, 7); ctx.fill(); }
     if (d.tool === 'mountain') { ctx.fillStyle = '#98938a'; ctx.fillRect((x - 2) * T, (y - 2) * T, MSIZE * T, MSIZE * T); }
     ctx.globalAlpha = 1;
-    if (UI.dragStart && (d.tool === 'road' || d.tool === 'river')) {
+    if (UI.dragStart && (d.tool === 'road' || d.tool === 'river' || d.tool === 'rail')) {
       ctx.globalAlpha = 0.55;
       const s = UI.dragStart;
-      if (d.tool === 'road') {
-        ctx.fillStyle = '#cfcaba';
+      if (d.tool === 'road' || d.tool === 'rail') {
+        ctx.fillStyle = d.tool === 'rail' ? '#a5824f' : '#cfcaba';
         const sx = Math.sign(x - s.x) || 1, sy = Math.sign(y - s.y) || 1;
         for (let xx = s.x; xx !== x + sx; xx += sx) ctx.fillRect(xx * T, s.y * T, T, T);
         for (let yy = s.y; yy !== y + sy; yy += sy) ctx.fillRect(x * T, yy * T, T, T);
@@ -860,6 +984,7 @@ function finishDragTool(x, y) {
   const d = CAT[UI.tool.key], s = UI.dragStart;
   if (!s) return;
   if (d.tool === 'road') { World.layRoadLine(s.x, s.y, x, y); afterMapEdit(); }
+  if (d.tool === 'rail') { World.layRailLine(s.x, s.y, x, y); afterMapEdit(); toast('Railway track laid 🛤️ — connect two train stations to start a service'); }
   if (d.tool === 'river') { World.carveRiver(s.x, s.y, x, y, null); afterMapEdit(); toast('River carved 🏞️'); }
   UI.dragStart = null;
 }
@@ -917,7 +1042,7 @@ canvas.addEventListener('pointerup', e => {
   }
   if (UI.tool && UI.dragStart) {
     const d = CAT[UI.tool.key];
-    if (d.tool === 'road' || d.tool === 'river') finishDragTool(t.x, t.y);
+    if (d.tool === 'road' || d.tool === 'river' || d.tool === 'rail') finishDragTool(t.x, t.y);
     UI.dragStart = null;
   }
 });
@@ -956,6 +1081,7 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Escape') { setTool(null); hideInfo(); }
   if (e.key === ' ') { e.preventDefault(); setSpeed(UI.speedIdx === 0 ? 1 : 0); }
   if (e.key >= '1' && e.key <= '4') setSpeed(+e.key - 1);
+  if (e.key === 'h' || e.key === 'H') toggleSidebar();
   clampCam();
 });
 
@@ -978,6 +1104,7 @@ const CAT_GROUPS = [
   ['work', '🏭 Work & Industry'],
   ['shop', '🛍️ Shops & Services'],
   ['civic', '🏛️ Civic'],
+  ['transport', '🚌 Transport'],
   ['leisure', '🎡 Leisure & Fun'],
   ['nature', '🌲 Nature'],
 ];
@@ -1053,7 +1180,7 @@ function updateHUD() {
   if (leaderEl) {
     if (typeof Gov !== 'undefined' && Gov.campaign) {
       const d = Math.max(0, Gov.campaign.electionDay - Sim.day);
-      leaderEl.textContent = (Gov.leader ? Gov.leader.name : 'Campaign season') + ` · 🗳️ ${d}d`;
+      leaderEl.textContent = d === 0 ? '🗳️ VOTING DAY' : (Gov.leader ? Gov.leader.name : 'Campaign season') + ` · 🗳️ ${d}d`;
       if (leaderWrap) leaderWrap.title = 'Election campaign: ' + Gov.campaign.candidates.map(c => `${c.name} ${c.type.emoji}`).join(' vs ');
     } else if (typeof Gov !== 'undefined' && Gov.leader) {
       leaderEl.textContent = `${Gov.leader.name} · ${Math.round(Gov.approval)}%`;
@@ -1074,6 +1201,7 @@ function updateHUD() {
 /* ---------------- SimCity-style minimap ---------------- */
 const MM_COLORS = {
   res: '#3fae5c', shop: '#4f7ed0', work: '#d0a83f', civic: '#9aa4b4', leisure: '#c05fa8', hidden: '#3fae5c',
+  transport: '#4fc0b0',
 };
 function updateMinimap() {
   const mc = document.getElementById('minimap');
@@ -1088,6 +1216,7 @@ function updateMinimap() {
     if (g0 === G_WATER) put(i, 63, 127, 208);
     else if (g0 === G_ROCK) put(i, 126, 122, 114);
     else if (World.tree[i]) put(i, winter ? 150 : 30, winter ? 160 : 58, winter ? 175 : 32);
+    else if (World.railMap[i]) put(i, 122, 92, 56);
     else if (World.roadMap[i]) put(i, 44, 46, 52);
     else put(i, winter ? 208 : 40, winter ? 216 : 74, winter ? 228 : 44);
   }
@@ -1113,12 +1242,13 @@ function setSpeed(i) {
 }
 
 function toast(msg) {
+  if (typeof Tasks !== 'undefined') Tasks.log(msg); // nothing is lost — it all lands in the task book
   const wrap = document.getElementById('toasts');
   const t = document.createElement('div');
   t.className = 'toast'; t.textContent = msg;
   wrap.appendChild(t);
   while (wrap.children.length > 4) wrap.removeChild(wrap.firstChild);
-  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 400); }, 4200);
+  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 400); }, 6000);
 }
 
 function showInfo(b) {
@@ -1132,14 +1262,31 @@ function showInfo(b) {
   if (b.upgrading > 0) rows += `<div class="info-row">🔨 Adding a floor…</div>`;
   if (b.renovating > 0) rows += `<div class="info-row">🎨 Being renovated</div>`;
   rows += `<div class="info-row">${b.connected ? '🛣️ Connected to roads' : '⚠️ No road access!'}</div>`;
+  if (b.type === 'trainstation')
+    rows += `<div class="info-row">${Life.stationRailDoor(b) ? '🛤️ Rail track connected' : '⚠️ No rails yet — drag the Railway tool up to this station'}</div>`;
+  if (b.type === 'busstop' && World.buildings.filter(q => q.type === 'busstop' && !q.construction && !q.ruined).length < 2)
+    rows += `<div class="info-row">💡 Place a second bus stop to start the bus line</div>`;
+  if (typeof Gov !== 'undefined' && !b.ruined)
+    rows += `<div class="info-row">📍 ${Gov.districtName(b.x, b.y)} · land value $${Gov.landPrice(b.x, b.y)}/tile</div>`;
   if (CAT[b.type].res && !b.ruined) {
     rows += `<div class="info-row">💰 Savings: $${Math.round(b.funds)}</div>`;
     if (b.ownerId) rows += `<div class="info-row">🔑 Renting from another family</div>`;
   }
   if (d.visit && b.funds > 0) rows += `<div class="info-row">💵 Lifetime earnings: $${Math.round(b.funds)}</div>`;
+  if (b.founderId) {
+    const f = Sim.people.find(p => p.id === b.founderId);
+    if (f) {
+      rows += `<div class="info-row">🧑‍💼 Owner: ${Sim.fullName(f)}${f.loan ? ` (loan: $${Math.round(f.loan.balance)} left)` : ''}</div>`;
+      if (b.landPrice) rows += `<div class="info-row">🪧 Plot bought from the village for $${b.landPrice}</div>`;
+      if (b.badDays >= 4) rows += `<div class="info-row">📉 Struggling — ${b.badDays} slow days</div>`;
+    }
+  }
   if (b.residents.length) {
     const fams = [...new Set(b.residents.map(r => r.surname))];
     rows += `<div class="info-row">👥 ${b.residents.length} residents (${fams.join(', ')})</div>`;
+    const names = b.residents.slice(0, 5).map(r =>
+      `${r.name || '·'} (${r.age !== undefined ? r.age : '?'})`).join(', ');
+    rows += `<div class="info-row">🪪 ${names}${b.residents.length > 5 ? '…' : ''}</div>`;
     const away = b.residents.filter(r => r.at !== b || r.state === 'walk').length;
     rows += `<div class="info-row">🚶 ${away} out right now</div>`;
     const am = b.residents.reduce((s2, r) => s2 + (r.mood === undefined ? 60 : r.mood), 0) / b.residents.length;
@@ -1264,6 +1411,7 @@ function frame(now) {
   if (now - UI.lastStats > 400) {
     UI.lastStats = now;
     updateHUD();
+    if (typeof Tasks !== 'undefined') { Tasks.render(); Tasks.badge(); }
     if (UI.selected && document.getElementById('info').style.display === 'block') showInfo(UI.selected);
   }
   requestAnimationFrame(frame);
@@ -1275,6 +1423,19 @@ function resize() {
   canvas.height = wrap.clientHeight;
   ctx.imageSmoothingEnabled = false;
   clampCam();
+}
+
+/* =============== sidebar collapse =============== */
+function setSidebarHidden(hidden) {
+  document.getElementById('app').classList.toggle('nosidebar', hidden);
+  const st = document.getElementById('sidebar-toggle');
+  st.textContent = hidden ? '▶' : '◀';
+  st.title = hidden ? 'Show sidebar (H)' : 'Hide sidebar (H)';
+  localStorage.setItem('pixelville-sidebar', hidden ? '1' : '0');
+  resize();
+}
+function toggleSidebar() {
+  setSidebarHidden(!document.getElementById('app').classList.contains('nosidebar'));
 }
 
 /* =============== background progress ===============
@@ -1324,6 +1485,11 @@ function boot() {
   const sb = document.getElementById('btn-sound');
   sb.textContent = Snd.enabled ? '🔊' : '🔇';
   sb.addEventListener('click', () => { Snd.start(); sb.textContent = Snd.toggle() ? '🔊' : '🔇'; });
+  // the village task book
+  document.getElementById('btn-journal').addEventListener('click', () => Tasks.toggle());
+  document.getElementById('journal-close').addEventListener('click', () => Tasks.toggle());
+  document.querySelectorAll('#journal-tabs button').forEach(b =>
+    b.addEventListener('click', () => Tasks.setTab(b.dataset.tab)));
   // minimap: click to jump
   const mm = document.getElementById('minimap');
   mm.addEventListener('pointerdown', e => {
@@ -1345,6 +1511,8 @@ function boot() {
   });
   document.getElementById('btn-help').addEventListener('click', () =>
     document.getElementById('help').style.display = 'flex');
+  document.getElementById('sidebar-toggle').addEventListener('click', toggleSidebar);
+  if (localStorage.getItem('pixelville-sidebar') === '1') setSidebarHidden(true);
   requestAnimationFrame(frame);
 }
 boot();

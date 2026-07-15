@@ -17,6 +17,7 @@
   <main id="canvas-wrap">
     <canvas id="game"></canvas>
     <div id="vignette"></div>
+    <button id="sidebar-toggle" title="Hide sidebar (H)">◀</button>
 
     <div id="topbar">
       <span id="clock">Day 1 · Mon · 07:00</span>
@@ -35,6 +36,7 @@
         <button title="Pause (space)">⏸</button><button title="Normal speed">▶</button><button title="Fast">⏩</button><button title="Very fast">⏭</button>
       </span>
       <span id="filebtns">
+        <button id="btn-journal" title="Task book & village news">📖<span id="journal-badge"></span></button>
         <button id="btn-sound" title="Sound on/off">🔊</button>
         <button id="btn-save" title="Save to browser">💾</button>
         <button id="btn-load" title="Load save">📂</button>
@@ -46,6 +48,18 @@
     <div id="hint"></div>
     <div id="info"></div>
     <div id="toasts"></div>
+
+    <div id="journal">
+      <div id="journal-head">
+        <span>📖 Village Task Book</span>
+        <button id="journal-close" title="Close">✕</button>
+      </div>
+      <div id="journal-tabs">
+        <button data-tab="tasks" class="active">📋 Tasks</button>
+        <button data-tab="news">📰 News</button>
+      </div>
+      <div id="journal-list"></div>
+    </div>
 
     <div id="sc-panel">
       <div id="rci" title="Demand: Residential · Commercial · Industrial (jobs)">
@@ -66,12 +80,16 @@
           <li>🌄 <b>Drop mountains, rivers &amp; lakes</b> — roads carve around rock and bridge over water. Watch for hikers on the peaks… and mysterious lights up there at night.</li>
           <li>🍂 <b>Seasons &amp; weather</b> — spring blossoms, summer fireflies, autumn leaves, winter snow. Rain pours, storms flash, and heavy rain leaves puddles.</li>
           <li>🌙 <b>Real nights</b> — glowing windows, street lamps, car headlights, torches.</li>
-          <li>🚨 <b>Crime &amp; justice</b> — unemployment breeds burglars. Build a police station (and a courthouse) to keep the town safe.</li>
+          <li>🚨 <b>Crime &amp; justice</b> — unemployment breeds burglars. Build police stations (one per district!), a courthouse and a prison-worthy justice system.</li>
+          <li>📖 <b>Task book</b> — every project, emergency and election is logged and crossed off when done. Click the book in the top bar.</li>
+          <li>🚌 <b>Transport</b> — bus stops, taxis, railways with trains, docks with boats &amp; ferries, and helicopters between helipads.</li>
+          <li>💍 <b>Generations</b> — villagers fall in love, marry, raise kids, get promoted, grow old and pass the village on.</li>
+          <li>🏦 <b>Real economy</b> — land is bought from the government (prices vary by district), banks give loans, businesses boom or go under.</li>
         </ul>
         <p class="help-controls">
           <b>Controls:</b> click a palette item, then click the map to place · drag map or WASD to pan ·
           wheel to zoom · right-click / Esc to cancel a tool · click any building to inspect it · space pauses ·
-          keys 1–4 set game speed.
+          keys 1–4 set game speed · H hides the sidebar for full-screen viewing.
         </p>
         <button id="help-close">Start building ▶</button>
       </div>
@@ -79,6 +97,7 @@
   </main>
 </div>
 
+<script src="js/tasks.js"></script>
 <script src="js/sprites.js"></script>
 <script src="js/world.js"></script>
 <script src="js/weather.js"></script>
