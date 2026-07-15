@@ -83,7 +83,7 @@ const Weather = {
       if (this.kind === 'snow' && s !== 3) this.roll();
       if (onSeasonChange) onSeasonChange(s);
     }
-    this.nextChange -= dtSim * 10;
+    this.nextChange -= dtSim * MIN_PER_SEC;
     if (this.nextChange <= 0) this.roll();
     if (this.season === 3 && (this.kind === 'rain' || this.kind === 'heavy')) { this.kind = 'snow'; this.target = 0.8; }
 

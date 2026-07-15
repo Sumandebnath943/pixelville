@@ -29,7 +29,7 @@ const ADULT_LIFESTYLES = [
   { id: 'neighbor', weight: 10, aspiration: 'community', saveRate: 0.26, funding: 'wages' },
   { id: 'risk-taker', weight: 5, aspiration: 'business', saveRate: 0.38, funding: 'risk', kinds: ['shop', 'cafe', 'market'] },
 ];
-const STARTUP_COSTS = { shop: 260, cafe: 285, bakery: 270, market: 360 };
+const STARTUP_COSTS = { shop: 210, cafe: 230, bakery: 220, market: 320 };
 
 function chooseLifestyle() {
   let roll = Math.random() * ADULT_LIFESTYLES.reduce((n, s) => n + s.weight, 0);
@@ -146,6 +146,7 @@ const Sim = {
         businessKind: businessKinds ? businessKinds[(Math.random() * businessKinds.length) | 0] : null,
         savings: kind === 'kid' ? 0 : 8 + Math.random() * 22,
         heldUntil: 0, lastIllegalDay: -99,
+        mood: 58 + Math.random() * 22, // 0-100: feelings drive votes, riots & outings
         x: 0, y: 0,
       };
       b.residents.push(p); this.people.push(p);
@@ -232,13 +233,14 @@ const Sim = {
         const shopT = worksToday ? 1120 + jit() : 560 + Math.random() * 500;
         add(shopT, this.pickVenue('shop', p), shopT + 30 + Math.random() * 35);
       }
-      // evening out — weather and season set the mood
+      // evening out — weather, season and feelings set the mood
       let outP = wkend ? 0.75 : 0.45;
       if (typeof Weather !== 'undefined') {
         if (Weather.isRaining() || Weather.isSnowing()) outP *= 0.5;
         if (Weather.season === 1) outP *= 1.2;   // summer nights
         if (Weather.season === 3) outP *= 0.75;  // winter cocooning
       }
+      if ((p.mood === undefined ? 60 : p.mood) < 45) outP *= 1.3; // gloomy people go looking for cheer
       if (Math.random() < outP) {
         const t = 1110 + Math.random() * 120;
         add(t, this.pickVenue('leisure', p), t + 55 + Math.random() * 50);
@@ -281,7 +283,6 @@ const Sim = {
 
   /* ---------- tick ---------- */
   tick(dtSim) { // dtSim = real seconds * speed multiplier
-    const MIN_PER_SEC = 10; // 1 real second = 10 game minutes at 1x
     this.clock += dtSim * MIN_PER_SEC;
     if (this.clock >= 1440) {
       this.clock -= 1440;
@@ -295,7 +296,7 @@ const Sim = {
       if (typeof Gov !== 'undefined') Gov.dayTick();
     }
     // construction sites make progress
-    const gm = dtSim * 10;
+    const gm = dtSim * MIN_PER_SEC;
     for (const b of World.buildings) {
       if (b.construction > 0) { b.construction -= gm; if (b.construction <= 0) { b.construction = 0; this.completed.push(b); World.dirty = true; } }
       if (b.upgrading > 0) {
@@ -314,8 +315,28 @@ const Sim = {
   },
   completed: [],
 
+  /* ---------- feelings: a light daily mood model ----------
+     Mood follows real circumstances — work, savings, safety, home, fun —
+     and in turn drives votes, protests, and how people spend their evenings. */
+  updateMoods() {
+    for (const p of this.people) {
+      if (p.mood === undefined) p.mood = 60;
+      let target = 50;
+      target += p.work ? 12 : (p.kind === 'kid' ? 6 : -12);
+      target += Math.max(-8, Math.min(12, (p.home.funds - 30) / 12));
+      target += (this.safety - 70) * 0.18;
+      if (p.home.ruined || p.home.fire) target -= 28;
+      if (p.heldUntil > this.day) target -= 22; // in trouble with the law
+      if (p.ownsBusiness) target += 8;          // pride of ownership
+      if (p.funDay === this.day - 1) target += 7; // yesterday's outing still glows
+      if (typeof Weather !== 'undefined' && Weather.kind === 'clear') target += 3;
+      p.mood = Math.max(5, Math.min(98, p.mood + (target - p.mood) * 0.3 + (Math.random() - 0.5) * 6));
+    }
+  },
+
   /* ---------- household economy: upgrades, cars, rentals, luck ---------- */
   dailyEconomy() {
+    this.updateMoods();
     for (const b of World.buildings) {
       if (b.ruined || b.construction) continue;
       const d = CAT[b.type];
@@ -373,7 +394,7 @@ const Sim = {
     for (const p of this.people) {
       if (p.kind === 'kid' || p.aspiration !== 'business' || p.ownsBusiness || p.heldUntil > this.day) continue;
       if (!p.work && p.fundingPlan !== 'risk' && Math.random() < 0.65) {
-        p.savings = (p.savings || 0) + 2 + Math.random() * 3;
+        p.savings = (p.savings || 0) + 3 + Math.random() * 4;
         p.oddJobDays = (p.oddJobDays || 0) + 1;
       }
     }
@@ -396,7 +417,7 @@ const Sim = {
       // This is limited to the small risk-taking group, has a long cooldown,
       // and carries a meaningful arrest/hold consequence.
       if (founder.fundingPlan === 'risk') this.tryPettyTheft(founder);
-      this.nextEnterpriseDay = this.day + 2 + ((Math.random() * 3) | 0);
+      this.nextEnterpriseDay = this.day + 1 + ((Math.random() * 2) | 0);
       return;
     }
 
@@ -414,7 +435,7 @@ const Sim = {
     founder.ownsBusiness = true;
     founder.fundingRoute = familySpend > 0 && personalSpend > 0 ? 'savings and family backing' :
       familySpend > 0 ? 'family savings' : 'personal savings';
-    this.nextEnterpriseDay = this.day + 4 + ((Math.random() * 4) | 0);
+    this.nextEnterpriseDay = this.day + 3 + ((Math.random() * 3) | 0);
     World.refreshConnections();
     if (typeof Life !== 'undefined') {
       const title = founder.kind === 'woman' ? 'Ms.' : 'Mr.';
@@ -435,6 +456,11 @@ const Sim = {
     p.savings = (p.savings || 0) + amount;
     p.lastIllegalDay = this.day;
     p.illicitIncome = (p.illicitIncome || 0) + amount;
+    // the alarm rings and a patrol car visibly answers the call
+    target.alarm = true; target.alarmT = 30;
+    if (typeof Life !== 'undefined') Life.dispatchTo(target.door.x, target.door.y);
+    const ownerHome = target.ownerId ? World.buildings.find(o => o.id === target.ownerId) : null;
+    if (ownerHome) for (const r of ownerHome.residents) r.mood = Math.max(5, (r.mood === undefined ? 60 : r.mood) - 8);
 
     const policePresent = World.buildings.some(b => b.type === 'police' && b.connected && !b.construction && !b.ruined);
     const caught = Math.random() < (policePresent ? 0.7 : 0.24);
@@ -506,7 +532,13 @@ const Sim = {
       return;
     }
     if (p.state === 'walk' && p.trip) {
-      if (p.freezeT > 0) { p.freezeT -= dt * 10; return; } // stopped mid-street (dispute)
+      if (p.freezeT > 0) { p.freezeT -= dt * MIN_PER_SEC; return; } // stopped mid-street (dispute)
+      // feelings show on faces in the street
+      if (!p.trip.car && (!p.bubbleUntil || performance.now() > p.bubbleUntil) && Math.random() < dt * 0.05) {
+        const m = p.mood === undefined ? 60 : p.mood;
+        p.bubble = m >= 75 ? '😄' : m >= 52 ? '🙂' : m >= 36 ? '😕' : '😠';
+        p.bubbleUntil = performance.now() + 1800;
+      }
       const t = p.trip;
       const speed = t.car ? CAR_SPEED : WALK_SPEED;
       t.prog += speed * dt;
@@ -521,6 +553,10 @@ const Sim = {
           const cd = CAT[dest.type];
           if (cd.visit) {
             dest.visitors++;
+            if (cd.visit === 'leisure') { // fun genuinely lifts the spirit
+              p.mood = Math.min(98, (p.mood === undefined ? 60 : p.mood) + 4);
+              p.funDay = this.day;
+            }
             const price = PRICES[dest.type] || 0; // money changes hands
             if (price && p.home.funds > price) {
               p.home.funds -= price;
@@ -634,11 +670,15 @@ const Sim = {
       i: clamp01((adults.length - employed) / 6),
     };
     let hap = 50;
-    if (adults.length) hap = Math.round(
-      45 * (employed / adults.length) +
-      20 * Math.min(1, leisureN / Math.max(1, pop / 14)) +
-      15 * Math.min(1, shopN / Math.max(1, pop / 18)) +
-      20 * (this.safety / 100));
+    if (adults.length) {
+      const base =
+        45 * (employed / adults.length) +
+        20 * Math.min(1, leisureN / Math.max(1, pop / 14)) +
+        15 * Math.min(1, shopN / Math.max(1, pop / 18)) +
+        20 * (this.safety / 100);
+      const avgMood = this.people.reduce((s2, p) => s2 + (p.mood === undefined ? 60 : p.mood), 0) / this.people.length;
+      hap = Math.round(base * 0.6 + avgMood * 0.4); // the town is as happy as its people feel
+    }
     return { pop, employed, adults: adults.length, jobs, happiness: pop ? hap : 100, safety: Math.round(this.safety), wealth, demand, vacant };
   },
 

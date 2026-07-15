@@ -41,10 +41,13 @@ const LEADER_TYPES = [
 const CIVIC_COSTS = {
   fire: 260, police: 260, school: 320, hospital: 420, park: 140, library: 200,
   playground: 100, pool: 180, townhall: 380, shop: 160, market: 220, office: 300,
-  factory: 340, mall: 480, bank: 300,
+  factory: 340, mall: 480, bank: 300, house: 190, apartment: 430,
 };
 
 const civicClamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+
+const CAMPAIGN_DAYS = 7;      // a full week of banners, rallies and promises
+const CAND_COLORS = ['#e05a5a', '#4f8ede', '#4fae5c', '#d09a3a'];
 
 const Gov = {
   leader: null,
@@ -57,6 +60,7 @@ const Gov = {
   unmetNeeds: {},
   riotCd: 0,
   election: null,
+  campaign: null,
 
   reset() {
     this.leader = null;
@@ -69,6 +73,8 @@ const Gov = {
     this.unmetNeeds = {};
     this.riotCd = 0;
     this.election = null;
+    this.campaign = null;
+    this.officeTimer = 0;
   },
 
   say(message) { if (typeof Life !== 'undefined') Life.say(message); },
@@ -112,6 +118,7 @@ const Gov = {
       if (Life.crimes >= 2 && !active('police')) score -= 10;
     }
     if (home && (home.ruined || home.fire)) score -= 24;
+    score += ((person.mood === undefined ? 60 : person.mood) - 55) * 0.22; // feelings colour the ballot
     return civicClamp(score, 2, 98);
   },
 
@@ -153,8 +160,62 @@ const Gov = {
   },
 
   maybeFirstElection() {
-    if (!this.leader && this.voters().length >= 6) {
-      this.elect({ reason: 'first election', includeIncumbent: false });
+    if (!this.leader && !this.campaign && this.voters().length >= 6)
+      this.startCampaign(Sim.day + 4, false, 'first election');
+  },
+
+  /* ---------- the campaign: a visible week of banners, rallies & promises ---------- */
+  promiseFor(c) {
+    const needs = this.assessNeedsList().filter(n => n !== 'townhall');
+    const concrete = needs.length ? `a new ${CAT[needs[0]].name.toLowerCase()}` : null;
+    switch (c.type.kind) {
+      case 'visionary': return (concrete ? concrete + ' and ' : '') + 'a better life for every family';
+      case 'business': return (concrete ? concrete + ', ' : '') + 'jobs and a booming main street';
+      case 'steady': return (concrete ? concrete + ' and ' : '') + 'safe, quiet streets that just work';
+      default: return 'lower taxes, free everything, and gold-paved roads (somehow)';
+    }
+  },
+
+  startCampaign(electionDay, includeIncumbent, reason) {
+    const candidates = this.makeCandidates(includeIncumbent);
+    candidates.forEach((c, i) => {
+      c.color = CAND_COLORS[i % CAND_COLORS.length];
+      c.promise = this.promiseFor(c);
+    });
+    // banners strung along busy streets, roughly one per candidate colour
+    const roads = [];
+    for (let i = 0; i < World.roadMap.length; i++) if (World.roadMap[i]) roads.push(i);
+    const banners = [];
+    for (let k = 0; k < 40 && banners.length < 12 && roads.length; k++) {
+      const r = roads[(Math.random() * roads.length) | 0];
+      const x = r % GW, y = (r / GW) | 0;
+      if (banners.some(bn => Math.abs(bn.x - x) + Math.abs(bn.y - y) < 5)) continue;
+      banners.push({ x, y, ci: banners.length % candidates.length });
+    }
+    this.campaign = { candidates, electionDay, banners, nextRally: 0, reason };
+    this.say(`🗳️ Election season! ${candidates.map(c => `${c.name} ${c.type.emoji}`).join(' vs ')} — voting in ${electionDay - Sim.day} days.`);
+  },
+
+  campaignTick() {
+    const c = this.campaign;
+    if (!c) return;
+    if (Sim.day >= c.electionDay) {
+      this.elect({ reason: c.reason || 'annual election', candidates: c.candidates });
+      this.campaign = null;
+      if (typeof Life !== 'undefined') Life.rally = null;
+      return;
+    }
+    // today's rally, rotating through the candidates
+    const cand = c.candidates[c.nextRally % c.candidates.length];
+    c.nextRally++;
+    if (typeof Life !== 'undefined') Life.startRally(cand);
+    if (cand.incumbent) {
+      const rec = (this.leader && this.leader.built || []).slice(-3);
+      this.say(rec.length
+        ? `📣 Rally: Mayor ${cand.name} points at the new ${rec.join(', ')} — "four more seasons!"`
+        : `📣 Rally: Mayor ${cand.name} asks the village for more time to deliver.`);
+    } else {
+      this.say(`📣 Rally: ${cand.name} ${cand.type.emoji} promises ${cand.promise}.`);
     }
   },
 
@@ -243,7 +304,7 @@ const Gov = {
     const voters = this.voters();
     if (voters.length < 3) return null;
     const former = this.leader;
-    const candidates = this.makeCandidates(options.includeIncumbent !== false);
+    const candidates = options.candidates || this.makeCandidates(options.includeIncumbent !== false);
     const votes = new Array(candidates.length).fill(0);
     for (const voter of voters) {
       let choice = 0;
@@ -266,9 +327,20 @@ const Gov = {
       electedDay: Sim.day,
       term: reelected ? (former.term || 1) + 1 : 1,
       voteShare: share,
+      promise: winner.promise || null,
+      built: reelected ? (former.built || []) : [],
     };
     this.lastElection = Sim.day;
     this.scandals = reelected ? Math.max(0, this.scandals - 1) : 0;
+    // a voted-out mayor clears their desk at the town hall
+    if (former && former.personId && former.personId !== winner.personId) {
+      const oldP = Sim.people.find(q => q.id === former.personId);
+      if (oldP && oldP.work && oldP.work.type === 'townhall') {
+        oldP.work.workers = oldP.work.workers.filter(w => w !== oldP);
+        oldP.work = null;
+        Sim.assignJobs();
+      }
+    }
     this.approval = civicClamp(Math.round(this.civicQuality() * 0.68 + share * 0.22), 18, 88);
     this.election = {
       day: Sim.day,
@@ -281,6 +353,12 @@ const Gov = {
     if (!former) this.say(`🗳️ ${winner.name} was elected mayor with ${share}% of the village vote — ${winner.type.label} ${winner.type.emoji}`);
     else if (reelected) this.say(`🗳️ Election day: Mayor ${winner.name} kept the trust of the village (${share}% of votes).`);
     else this.say(`🗳️ Election day: ${former.name} was voted out. ${winner.name} won with ${share}% of votes.`);
+    // victory celebration outside the town hall
+    if (typeof Life !== 'undefined') {
+      const hall = World.buildings.find(b => b.type === 'townhall' && !b.ruined) ||
+                   World.buildings.find(b => b.connected && !b.ruined);
+      if (hall) Life.celebrate(hall.x * T + hall.w * 8, hall.y * T + hall.h * 16, winner.color);
+    }
     return { winner, share, reelected, candidates, votes };
   },
 
@@ -317,6 +395,7 @@ const Gov = {
   /* Called once at the beginning of every in-game day. */
   dayTick() {
     this.maybeFirstElection();
+    this.campaignTick(); // rallies during the campaign week; the vote on election day
     // Communities still help each other before a formal government exists.
     this.communityTick();
     if (!this.leader) return;
@@ -324,27 +403,48 @@ const Gov = {
       this.forceResign('after leaving the village');
       return;
     }
+    // one week before the term ends, campaign season opens
+    if (!this.campaign && Sim.day - this.lastElection >= ELECTION_PERIOD - CAMPAIGN_DAYS)
+      this.startCampaign(this.lastElection + ELECTION_PERIOD, true, 'annual election');
     this.collectTaxes();
     this.updateApproval();
+    this.ensureOffice();
 
     const L = this.leader;
-    if (Math.random() < 0.36 * L.type.zeal) this.spend();
+    // an emergency (fire, crime wave) forces an emergency session; otherwise
+    // how often the mayor acts depends on their personality
+    const urgentNow = this.assessNeedsList().some(n => n === 'fire' || n === 'police');
+    if (Math.random() < (urgentNow ? 0.85 : 0.36 * L.type.zeal)) this.spend();
 
-    if (Sim.day - this.lastElection >= ELECTION_PERIOD) this.runElection();
     if (this.riotCd > 0) this.riotCd--;
   },
 
-  assessNeeds() {
+  /* Everything the village currently lacks, most pressing first. Tracking a
+     LIST (not just the top item) lets patience build up about several things
+     at once, the way real neighbours grumble about more than one problem. */
+  assessNeedsList() {
+    const stats = Sim.stats();
     const pop = Sim.people.length;
     const kids = Sim.people.filter(p => p.kind === 'kid').length;
     const parks = World.buildings.filter(b => (b.type === 'park' || b.type === 'playground') && !b.ruined).length;
-    if (typeof Life !== 'undefined' && Life.firesRecent >= 2 && !this.hasPlanned('fire')) return 'fire';
-    if (typeof Life !== 'undefined' && Life.crimes >= 2 && !this.hasPlanned('police')) return 'police';
-    if (kids >= 4 && !this.hasPlanned('school')) return 'school';
-    if (pop >= 45 && !this.hasPlanned('hospital')) return 'hospital';
-    if (parks < Math.floor(pop / 22)) return 'park';
-    return null;
+    const needs = [];
+    // a single fire is remembered long enough for the village to act on it
+    if (typeof Life !== 'undefined' && Life.firesRecent >= 0.5 && !this.hasPlanned('fire')) needs.push('fire');
+    if (typeof Life !== 'undefined' && Life.crimes >= 2 && !this.hasPlanned('police')) needs.push('police');
+    if (this.leader && !this.hasPlanned('townhall')) needs.push('townhall');
+    if (kids >= 4 && !this.hasPlanned('school')) needs.push('school');
+    // housing pressure: no vacancies while jobs go begging → build homes
+    const resUnderCon = World.buildings.some(b => CAT[b.type].res && b.construction > 0 && !b.ruined);
+    if (!resUnderCon && stats.vacant === 0 && stats.demand.r > 0.4)
+      needs.push(pop >= 30 ? 'apartment' : 'house');
+    if (pop >= 8 && !['shop', 'market', 'mall'].some(t => this.hasPlanned(t))) needs.push('shop');
+    if (pop >= 45 && !this.hasPlanned('hospital')) needs.push('hospital');
+    if (pop >= 55 && !this.hasPlanned('market')) needs.push('market');
+    if (parks < Math.floor(pop / 22)) needs.push('park');
+    return needs;
   },
+
+  assessNeeds() { return this.assessNeedsList()[0] || null; },
 
   spend() {
     if (!this.leader) return false;
@@ -367,6 +467,7 @@ const Gov = {
     this.treasury -= cost;
     this.recentBuilds += urgent === key ? 1.5 : 0.8;
     this.unmetNeeds[key] = 0;
+    L.built = (L.built || []).concat(CAT[key].name).slice(-8); // the record they run on
     World.refreshConnections();
     this.say(`🏛️ Mayor ${L.name} approved a new ${CAT[key].name}.`);
     return true;
@@ -374,27 +475,70 @@ const Gov = {
 
   countOf(type) { return World.buildings.filter(b => b.type === type && !b.ruined).length; },
 
-  /* Villagers pool savings after giving town hall several days to act. */
-  communityTick() {
-    const need = this.assessNeeds();
-    for (const key of Object.keys(this.needTimers)) if (key !== need) this.needTimers[key] = 0;
-    for (const key of Object.keys(this.unmetNeeds)) if (key !== need) this.unmetNeeds[key] = 0;
-    if (!need) return false;
-    if (World.buildings.some(b => b.type === need && b.construction > 0)) {
-      this.needTimers[need] = 0;
-      this.unmetNeeds[need] = 0;
-      return false;
+  /* ---------- the mayor's office ----------
+     An elected mayor needs a town hall: the treasury pays if it can, the
+     village pools funds if it can't, and the mayor then works there daily. */
+  ensureOffice() {
+    const hall = this.activeBuildings('townhall')[0];
+    if (hall) { this.assignLeaderOffice(hall); return; }
+    if (this.hasPlanned('townhall')) return; // already under construction
+    this.officeTimer = (this.officeTimer || 0) + 1;
+    if (this.officeTimer < 2) return;
+    const cost = CIVIC_COSTS.townhall;
+    if (this.treasury >= cost) {
+      const spot = World.findBuildSpot('townhall');
+      if (!spot) return;
+      const b = World.placeBuilding('townhall', spot.x, spot.y);
+      if (!b) return;
+      this.treasury -= cost;
+      this.recentBuilds += 0.5;
+      World.refreshConnections();
+      this.say(`🏛️ Work starts on the mayor's office — Mayor ${this.leader.name} needs a desk.`);
+    } else {
+      this.communityBuild('townhall', false); // neighbours chip in for their town hall
     }
-    this.needTimers[need] = (this.needTimers[need] || 0) + 1;
-    this.unmetNeeds[need] = (this.unmetNeeds[need] || 0) + 1;
-    // Emergencies (fires, crime waves) exhaust patience with town hall faster
-    // than quality-of-life wishes do.
-    const urgent = need === 'fire' || need === 'police';
-    if (this.needTimers[need] < (urgent ? 2 : 3)) return false; // first, wait for elected government
+  },
+
+  assignLeaderOffice(hall) {
+    if (!this.leader || !this.leader.personId) return;
+    const p = Sim.people.find(q => q.id === this.leader.personId);
+    if (!p || p.work === hall) return;
+    if (p.work) p.work.workers = p.work.workers.filter(w => w !== p);
+    p.work = hall;
+    hall.workers.push(p);
+    this.say(`🎩 Mayor ${this.leader.name} moved into the office at the Town Hall.`);
+  },
+
+  /* Villagers pool savings after giving town hall several days to act.
+     Needs age in parallel, so a new emergency no longer resets the village's
+     patience about everything else (that bug froze all self-building). */
+  communityTick() {
+    const needs = this.assessNeedsList();
+    for (const key of Object.keys(this.needTimers))
+      if (!needs.includes(key)) { this.needTimers[key] = 0; this.unmetNeeds[key] = 0; }
+    for (const need of needs) {
+      if (World.buildings.some(b => b.type === need && b.construction > 0)) {
+        this.needTimers[need] = 0; this.unmetNeeds[need] = 0;
+        continue;
+      }
+      this.needTimers[need] = (this.needTimers[need] || 0) + 1;
+      this.unmetNeeds[need] = (this.unmetNeeds[need] || 0) + 1;
+    }
+    // one community project a day, most pressing ripe need first — emergencies
+    // (fires, crime waves) exhaust patience with town hall fastest
+    for (const need of needs) {
+      const urgent = need === 'fire' || need === 'police';
+      if ((this.needTimers[need] || 0) < (urgent ? 2 : 3)) continue;
+      if (this.communityBuild(need, urgent)) return true;
+    }
+    return false;
+  },
+
+  communityBuild(need, urgent) {
     const cost = CIVIC_COSTS[need] || 220;
     const homes = World.buildings.filter(b => CAT[b.type].res && b.residents.length && b.funds > 8 && !b.ruined);
     const pool = homes.reduce((sum, b) => sum + b.funds, 0);
-    if (pool < cost * (urgent ? 1.0 : 1.2)) return false; // a poor village needs time to save
+    if (pool < cost * (urgent ? 1.0 : 1.15)) return false; // a poor village needs time to save
     const spot = World.findBuildSpot(need);
     if (!spot) return false;
     const b = World.placeBuilding(need, spot.x, spot.y);
@@ -409,19 +553,17 @@ const Gov = {
     World.refreshConnections();
     this.needTimers[need] = 0;
     this.unmetNeeds[need] = 0;
-    if (this.leader) this.approval = Math.max(5, this.approval - 6); // public embarrassment has a cost
-    this.say(`🤝 Tired of waiting, villagers pooled their savings to build a ${CAT[need].name} themselves!`);
+    if (this.leader && need !== 'townhall') this.approval = Math.max(5, this.approval - 6); // public embarrassment has a cost
+    const lead = homes[0] && homes[0].residents[0] ? `, led by the ${homes[0].residents[0].surname}s` : '';
+    this.say(`🤝 Tired of waiting, villagers pooled their savings to build a ${CAT[need].name} themselves${lead}!`);
     return true;
-  },
-
-  runElection() {
-    return this.elect({ reason: 'annual election', includeIncumbent: true });
   },
 
   forceResign(reason) {
     if (!this.leader) return;
     const former = this.leader;
     this.leader = null;
+    this.campaign = null; // any running campaign is overtaken by events
     this.say(`📜 Mayor ${former.name} resigned ${reason} — snap election!`);
     this.elect({ reason: 'snap election', includeIncumbent: false });
   },
@@ -435,6 +577,8 @@ const Gov = {
         electedDay: this.leader.electedDay || this.lastElection,
         term: this.leader.term || 1,
         voteShare: this.leader.voteShare || 0,
+        promise: this.leader.promise || null,
+        built: this.leader.built || [],
       } : null,
       treasury: Math.round(this.treasury),
       approval: Math.round(this.approval),
@@ -461,8 +605,11 @@ const Gov = {
         electedDay: leader.electedDay || g.lastElection || Sim.day,
         term: leader.term || 1,
         voteShare: leader.voteShare || 0,
+        promise: leader.promise || null,
+        built: leader.built || [],
       };
     }
+    this.campaign = null; // campaigns restart on their own if the window is still open
     this.treasury = g.treasury || 0;
     this.approval = g.approval || 55;
     this.lastElection = g.lastElection || Sim.day;

@@ -7,6 +7,7 @@
 const GW = 128, GH = 128;
 const G_GRASS = 0, G_WATER = 1, G_ROCK = 2;
 const MSIZE = 5; // mountain footprint (tiles)
+const MIN_PER_SEC = 4; // game-minutes per real second at 1x — one day ≈ 6 real minutes
 
 const World = {
   ground: new Uint8Array(GW * GH),
@@ -167,7 +168,7 @@ const World = {
     const d = CAT[key];
     const roads = [];
     for (let i = 0; i < this.roadMap.length; i++) if (this.roadMap[i]) roads.push(i);
-    for (let tries = 0; tries < 60 && roads.length; tries++) {
+    for (let tries = 0; tries < 140 && roads.length; tries++) {
       const r = roads[(Math.random() * roads.length) | 0];
       const rx = r % GW, ry = (r / GW) | 0;
       const x = rx - (d.w >> 1), y = ry - d.h;

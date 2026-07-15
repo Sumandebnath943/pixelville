@@ -230,6 +230,18 @@ function render(now) {
   if (Life.crime && Life.crime.burglar.phase !== 'rob')
     ents.push({ kind: 'burglar', B: Life.crime.burglar, base: Life.crime.burglar.y + 4 });
   for (const u of Life.police) ents.push({ kind: 'police', u, base: u.y + 4 });
+  for (const u of Life.fireTrucks) ents.push({ kind: 'firetruck', u, base: u.y + 4 });
+  if (Life.riot) Life.riot.crowd.forEach((r, ri) => ents.push({ kind: 'protester', r, ri, base: r.y + 4 }));
+  if (Life.rally) Life.rally.crowd.forEach((r, ri) => ents.push({ kind: 'listener', r, ri, base: r.y + 4 }));
+  if (Life.rally) ents.push({ kind: 'speaker', r: Life.rally, base: Life.rally.y + 5 });
+  if (Life.disaster) for (const h of Life.disaster.helpers) {
+    const f = Math.min(1, h.f), hx = h.sx + (h.tx - h.sx) * f, hy = h.sy + (h.ty - h.sy) * f;
+    ents.push({ kind: 'runner', h, x: hx, y: hy, base: hy + 4 });
+  }
+  for (const bk of Life.buckets) for (const h of bk.helpers) {
+    const f = Math.min(1, h.f), hx = h.sx + (h.tx - h.sx) * f, hy = h.sy + (h.ty - h.sy) * f;
+    ents.push({ kind: 'runner', h, x: hx, y: hy, base: hy + 4, bucket: bk.b });
+  }
   for (const tr of Life.tourists) if (tr.phase !== 'visit') ents.push({ kind: 'tourist', tr, base: tr.y + 4 });
   for (const dk of Life.ducks) ents.push({ kind: 'duck', dk, base: dk.y + 3 });
   ents.sort((a, b) => a.base - b.base);
@@ -281,6 +293,14 @@ function render(now) {
       ctx.globalAlpha = 1;
       ctx.drawImage(s.img, b.x * T, b.y * T - s.oy);
       if (Weather.season === 3) ctx.drawImage(s.snow, b.x * T, b.y * T - s.oy);
+      // the mayor's flag flies over an occupied town hall
+      if (b.type === 'townhall' && typeof Gov !== 'undefined' && Gov.leader) {
+        const fx = b.x * T + 4, fy = b.y * T - s.oy - 8;
+        ctx.fillStyle = '#8a8f96'; ctx.fillRect(fx, fy, 1, 9);
+        const wave = Math.sin(now / 300 + b.id) > 0 ? 0 : 1;
+        ctx.fillStyle = '#4f8ede'; ctx.fillRect(fx + 1, fy + wave, 6, 3);
+        ctx.fillStyle = '#f2c14f'; ctx.fillRect(fx + 3, fy + wave + 1, 2, 1);
+      }
       // upgrade / renovation scaffolding on the facade
       if (b.upgrading > 0 || b.renovating > 0) {
         ctx.fillStyle = '#8a6a3f';
@@ -410,6 +430,58 @@ function render(now) {
       const ft = Math.floor(now / 180) % 2 ? 'red' : 'blue';
       UI.lights.push({ x: u.x, y: u.y, r: 22, a: 0.9, tint: ft });
       if (dark > 0.1) UI.lights.push({ x: u.x + (u.dirx || 0) * 12, y: u.y + (u.diry || 0) * 12, r: 15, a: 0.8, tint: 'cool' });
+    } else if (e.kind === 'firetruck') {
+      const u = e.u, spr = SPR.fireTruck;
+      shadow(u.x, u.y + 3, 6, 2);
+      if (u.dirx !== 0) ctx.drawImage(spr.h, Math.round(u.x) - 6, Math.round(u.y) - 4);
+      else ctx.drawImage(spr.v, Math.round(u.x) - 4, Math.round(u.y) - 6);
+      UI.lights.push({ x: u.x, y: u.y - 3, r: 20, a: 0.9, tint: Math.floor(now / 170) % 2 ? 'red' : 'orange' });
+      if (dark > 0.1) UI.lights.push({ x: u.x + (u.dirx || 0) * 12, y: u.y + (u.diry || 0) * 12, r: 15, a: 0.8, tint: 'cool' });
+      if (u.phase === 'douse' && u.target) { // arcing water jet onto the flames
+        const wtx = u.target.x * T + u.target.w * 8, wty = u.target.y * T + 4;
+        ctx.fillStyle = 'rgba(140,200,245,0.9)';
+        for (let k = 0; k < 6; k++) {
+          const f = ((k / 6) + (now % 420) / 2520) % 1;
+          const wx = u.x + (wtx - u.x) * f, wy = u.y - 3 + (wty - u.y + 3) * f - Math.sin(f * Math.PI) * 9;
+          ctx.fillRect(wx, wy, 1.5, 1.5);
+        }
+      }
+    } else if (e.kind === 'runner') {
+      const spr = SPR.person(e.h.kind, e.h.seed);
+      shadow(e.x, e.y + 1.5, 3, 1.2);
+      ctx.drawImage(spr.f[e.h.f < 1 ? frame : Math.floor(now / 420) % 2], Math.round(e.x) - 3, Math.round(e.y) - spr.h + 1);
+      if (e.bucket) {
+        ctx.fillStyle = '#8fa6b8'; ctx.fillRect(Math.round(e.x) + 3, Math.round(e.y) - 3, 2, 2); // bucket in hand
+        if (e.h.f >= 1) { // tossed water flying toward the fire
+          const wtx = e.bucket.x * T + e.bucket.w * 8, wty = e.bucket.y * T + e.bucket.h * 4;
+          const f2 = (now / 500 + e.h.seed % 7) % 1;
+          ctx.fillStyle = 'rgba(150,205,245,0.85)';
+          ctx.fillRect(e.x + (wtx - e.x) * f2, e.y - 4 + (wty - e.y + 4) * f2 - Math.sin(f2 * Math.PI) * 6, 1.5, 1.5);
+        }
+      }
+    } else if (e.kind === 'protester' || e.kind === 'listener') {
+      const r = e.r, spr = SPR.person(r.kind, r.seed);
+      shadow(r.x, r.y + 1.5, 3, 1.2);
+      const hop = e.kind === 'protester' ? (Math.floor(now / 240) + e.ri) % 2 : 0;
+      ctx.drawImage(spr.f[hop], Math.round(r.x) - 3, Math.round(r.y) - spr.h + 1 - hop);
+      if (e.ri % 2 === 0) { // picket / campaign sign
+        const sy = Math.round(r.y) - spr.h;
+        ctx.fillStyle = '#8a6a45'; ctx.fillRect(Math.round(r.x) + 2, sy - 6, 1, 7);
+        ctx.fillStyle = '#f2eede'; ctx.fillRect(Math.round(r.x) - 1, sy - 10, 7, 5);
+        ctx.fillStyle = e.kind === 'protester' ? '#c04a40' : (Life.rally && Life.rally.color) || '#4f7ed0';
+        ctx.fillRect(Math.round(r.x), sy - 9, 5, 1); ctx.fillRect(Math.round(r.x), sy - 7, 4, 1);
+      } else if ((Math.floor(now / 900) + e.ri) % 3 === 0) {
+        ctx.font = '7px "Segoe UI Emoji", serif';
+        ctx.fillText(e.kind === 'protester' ? '💢' : '👏', Math.round(r.x) - 3, Math.round(r.y) - spr.h - 4);
+      }
+    } else if (e.kind === 'speaker') {
+      const R2 = e.r; // rally state: candidate on a soapbox
+      ctx.fillStyle = '#8a6a45'; ctx.fillRect(Math.round(R2.x) - 4, Math.round(R2.y) - 3, 9, 4); // crate
+      ctx.fillStyle = '#6d5333'; ctx.fillRect(Math.round(R2.x) - 4, Math.round(R2.y), 9, 1);
+      const spr = SPR.person(R2.speakerKind || 'man', R2.speakerSeed || 1);
+      ctx.drawImage(spr.f[Math.floor(now / 500) % 2], Math.round(R2.x) - 3, Math.round(R2.y) - spr.h - 3);
+      ctx.font = '8px "Segoe UI Emoji", serif';
+      if (Math.floor(now / 1100) % 2) ctx.fillText('📢', Math.round(R2.x) + 3, Math.round(R2.y) - spr.h - 5);
     } else if (e.kind === 'tourist') {
       const tr = e.tr, spr = SPR.car(tr.seed);
       shadow(tr.x, tr.y + 3, 6, 2);
@@ -495,6 +567,21 @@ function render(now) {
     const w1 = SPR.person('hiker', rw.x * 7 + rw.y);
     ctx.drawImage(w1.f[wf], rx - 3, ry + 2 - wf);
     ctx.drawImage(w1.f[1 - wf], rx + 15, ry + 8 - (1 - wf));
+  }
+  // election banners strung over the streets during campaign week
+  if (typeof Gov !== 'undefined' && Gov.campaign) {
+    for (const bn of Gov.campaign.banners) {
+      if (bn.x < vx0 || bn.x > vx1 || bn.y < vy0 || bn.y > vy1) continue;
+      const cand = Gov.campaign.candidates[bn.ci % Gov.campaign.candidates.length];
+      const bx = bn.x * T + 2, by = bn.y * T - 7;
+      ctx.fillStyle = '#6d5333';
+      ctx.fillRect(bx, by, 1, 9); ctx.fillRect(bx + 11, by, 1, 9);
+      const fl = Math.sin(now / 260 + bn.x * 1.7) > 0 ? 0 : 1;
+      ctx.fillStyle = cand.color || '#4f8ede';
+      ctx.fillRect(bx + 1, by + fl, 10, 4);
+      ctx.fillStyle = 'rgba(255,252,240,0.9)'; // "lettering"
+      ctx.fillRect(bx + 2, by + fl + 1, 2, 2); ctx.fillRect(bx + 5, by + fl + 1, 1, 2); ctx.fillRect(bx + 7, by + fl + 1, 2, 2);
+    }
   }
   // crash site
   if (Life.crash) {
@@ -964,9 +1051,14 @@ function updateHUD() {
   const leaderEl = document.getElementById('stat-leader');
   const leaderWrap = document.getElementById('stat-leader-wrap');
   if (leaderEl) {
-    if (typeof Gov !== 'undefined' && Gov.leader) {
+    if (typeof Gov !== 'undefined' && Gov.campaign) {
+      const d = Math.max(0, Gov.campaign.electionDay - Sim.day);
+      leaderEl.textContent = (Gov.leader ? Gov.leader.name : 'Campaign season') + ` · 🗳️ ${d}d`;
+      if (leaderWrap) leaderWrap.title = 'Election campaign: ' + Gov.campaign.candidates.map(c => `${c.name} ${c.type.emoji}`).join(' vs ');
+    } else if (typeof Gov !== 'undefined' && Gov.leader) {
       leaderEl.textContent = `${Gov.leader.name} · ${Math.round(Gov.approval)}%`;
-      if (leaderWrap) leaderWrap.title = `${Gov.leader.type.label}; elected with ${Gov.leader.voteShare || 0}% of the vote`;
+      if (leaderWrap) leaderWrap.title = `${Gov.leader.type.label}; elected with ${Gov.leader.voteShare || 0}% of the vote` +
+        (Gov.leader.promise ? `; promised ${Gov.leader.promise}` : '');
     } else {
       leaderEl.textContent = 'Self-governing';
       if (leaderWrap) leaderWrap.title = 'The village will elect a mayor once enough adults live here';
@@ -1050,6 +1142,14 @@ function showInfo(b) {
     rows += `<div class="info-row">👥 ${b.residents.length} residents (${fams.join(', ')})</div>`;
     const away = b.residents.filter(r => r.at !== b || r.state === 'walk').length;
     rows += `<div class="info-row">🚶 ${away} out right now</div>`;
+    const am = b.residents.reduce((s2, r) => s2 + (r.mood === undefined ? 60 : r.mood), 0) / b.residents.length;
+    rows += `<div class="info-row">${am >= 70 ? '😄' : am >= 50 ? '🙂' : am >= 35 ? '😕' : '😠'} Household mood: ${Math.round(am)}%</div>`;
+  }
+  if (b.type === 'townhall' && typeof Gov !== 'undefined' && Gov.leader) {
+    const mp = Gov.leader.personId ? Sim.people.find(q => q.id === Gov.leader.personId) : null;
+    rows += `<div class="info-row">🎩 Mayor ${Gov.leader.name}'s office${mp && mp.at === b && mp.state === 'in' ? ' — the mayor is in' : ''}</div>`;
+    if (Gov.leader.promise) rows += `<div class="info-row">🤞 Promised: ${Gov.leader.promise}</div>`;
+    rows += `<div class="info-row">🏦 Treasury: $${Math.round(Gov.treasury)}</div>`;
   }
   if (d.jobs) rows += `<div class="info-row">💼 ${b.workers.length}/${d.jobs} jobs filled</div>`;
   if (d.visit) rows += `<div class="info-row">🧾 ${b.visitors} visitors today</div>`;

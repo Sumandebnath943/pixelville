@@ -873,75 +873,139 @@ const SPR = {
   },
 
   makeMountains() {
-    // massive 5x5-footprint ranges, two variants, with hiking trails & peak markers
+    // massive 5x5-footprint ranges — hazy back ridges, peaks with shaded west
+    // faces and sunlit ridgelines, crags, jagged snow caps with gullies, and
+    // a mossy pine-fringed foothill that blends into the grass
     this.mountains = [];
     for (let v = 0; v < 2; v++) {
-      const W = 5 * T, EX = 52, H = 5 * T + EX;
+      const W = 5 * T, EX = 60, H = 5 * T + EX;
       const p = new P(W, H);
       const g = p.g;
-      const R = mulberry32(5000 + v * 97);
+      const R = mulberry32(7100 + v * 313);
       const peaks = [];
-      const peak = (cx, topY, baseW, col, lit, snowH) => {
-        const baseY = H - 4;
-        g.fillStyle = col; g.beginPath();
-        g.moveTo(cx - baseW / 2, baseY);
-        // craggy left edge
-        let px = cx - baseW / 2, py = baseY;
-        for (let i = 1; i <= 4; i++) {
-          const nx = cx - baseW / 2 + (baseW / 2) * (i / 4) + (R() - 0.5) * 5;
-          const ny = baseY - (baseY - topY) * (i / 4);
-          g.lineTo(i === 4 ? cx : nx, i === 4 ? topY : ny);
+      const baseY = H - 10;
+
+      // distant haze ridge behind everything
+      const haze = (cx, topY, bw) => {
+        g.fillStyle = '#a9b4bf';
+        g.beginPath();
+        g.moveTo(cx - bw / 2, baseY);
+        const n = 6;
+        for (let i = 1; i < n; i++) {
+          const f = i / n;
+          g.lineTo(cx - bw / 2 + bw * f,
+            baseY - Math.sin(f * Math.PI) * (baseY - topY) * (0.8 + (R() - 0.5) * 0.35));
         }
-        for (let i = 1; i <= 4; i++) {
-          const nx = cx + (baseW / 2) * (i / 4) + (R() - 0.5) * 5;
-          const ny = topY + (baseY - topY) * (i / 4);
-          g.lineTo(i === 4 ? cx + baseW / 2 : nx, i === 4 ? baseY : ny);
+        g.lineTo(cx + bw / 2, baseY);
+        g.closePath(); g.fill();
+      };
+
+      const poly = pts => {
+        g.beginPath(); g.moveTo(pts[0][0], pts[0][1]);
+        for (const [x, y] of pts) g.lineTo(x, y);
+        g.closePath(); g.fill();
+      };
+
+      // one peak: shadowed west face, lit east face, bright ridgeline, crags, snow
+      const peak = (cx, topY, bw, tone) => {
+        const Lt = [], Rt = [];
+        const n = 5;
+        for (let i = 0; i <= n; i++) {
+          const f = i / n;
+          const y = topY + (baseY - topY) * f;
+          const spread = (bw / 2) * Math.pow(f, 0.72); // steep summit, splayed base
+          Lt.push([cx - spread + (i > 0 && i < n ? R() * 6 - 3 : 0), y]);
+          Rt.push([cx + spread + (i > 0 && i < n ? R() * 6 - 3 : 0), y]);
         }
-        g.closePath(); g.fill();
-        // sunlit east face
-        g.fillStyle = lit; g.beginPath();
-        g.moveTo(cx, topY); g.lineTo(cx + baseW / 2, baseY); g.lineTo(cx + baseW / 8, baseY);
-        g.closePath(); g.fill();
-        // ridged shadow streaks
-        g.strokeStyle = 'rgba(40,36,30,0.25)'; g.lineWidth = 1;
-        for (let i = 0; i < 3; i++) {
-          g.beginPath();
-          g.moveTo(cx - baseW / 6 + i * 4, topY + 8 + i * 6);
-          g.lineTo(cx - baseW / 3 + i * 3, baseY - 4);
+        g.fillStyle = tone.dark;                       // whole body in shadow tone
+        poly(Lt.concat([...Rt].reverse()));
+        const RD = [];                                 // ridge drifts a touch west
+        for (let i = 0; i <= n; i++) {
+          const f = i / n;
+          RD.push([cx - bw * 0.06 * f + (i ? R() * 4 - 2 : 0), topY + (baseY - topY) * f]);
+        }
+        g.fillStyle = tone.mid;                        // sunlit east face
+        poly(RD.concat([...Rt].reverse()));
+        g.strokeStyle = tone.lit; g.lineWidth = 1.5;   // bright band along the ridge
+        g.beginPath(); g.moveTo(RD[0][0], RD[0][1]);
+        for (const [x, y] of RD) g.lineTo(x + 1, y);
+        g.stroke();
+        g.strokeStyle = 'rgba(30,28,24,0.30)'; g.lineWidth = 1; // crag shadows
+        for (let i = 0; i < 5; i++) {
+          const sx = cx + (R() - 0.6) * bw * 0.4;
+          const sy = topY + (baseY - topY) * (0.25 + R() * 0.5);
+          g.beginPath(); g.moveTo(sx, sy);
+          g.lineTo(sx - 2 - R() * 5, sy + 6 + R() * 10);
           g.stroke();
         }
-        // jagged snow cap
-        g.fillStyle = '#f2f5f8'; g.beginPath();
-        g.moveTo(cx, topY);
-        g.lineTo(cx - baseW / 5, topY + snowH);
-        g.lineTo(cx - baseW / 10, topY + snowH - 3);
-        g.lineTo(cx, topY + snowH + 4);
-        g.lineTo(cx + baseW / 10, topY + snowH - 3);
-        g.lineTo(cx + baseW / 5, topY + snowH);
+        p.dither(cx - bw / 2 + 2, topY + (baseY - topY) * 0.45, bw - 4, (baseY - topY) * 0.5, tone.spk, 0.10, R);
+        // snow cap with a jagged hem
+        const snowH = (baseY - topY) * (0.26 + R() * 0.08);
+        const hem = topY + snowH;
+        const hw = (bw / 2) * Math.pow(snowH / (baseY - topY), 0.72);
+        g.fillStyle = '#eef3f8';
+        g.beginPath();
+        g.moveTo(RD[0][0], topY);
+        g.lineTo(cx - hw, hem);
+        for (let x = cx - hw; x < cx + hw; x += 4) {
+          g.lineTo(x + 2, hem - 2 - R() * 3);
+          g.lineTo(x + 4, hem + R() * 2);
+        }
+        g.lineTo(cx + hw, hem);
         g.closePath(); g.fill();
-        g.fillStyle = '#dde6ee';
-        g.fillRect(cx - 1, topY + snowH, 2, 3);
+        g.fillStyle = 'rgba(160,180,200,0.5)';         // cap's shaded west half
+        g.beginPath(); g.moveTo(RD[0][0], topY); g.lineTo(cx - hw, hem); g.lineTo(cx - bw * 0.05, hem); g.closePath(); g.fill();
+        g.strokeStyle = 'rgba(238,243,248,0.75)';      // snow gullies below the hem
+        for (let i = 0; i < 3; i++) {
+          const gx = cx - bw * 0.18 + i * bw * 0.16 + R() * 3;
+          g.beginPath(); g.moveTo(gx, hem - 1);
+          g.lineTo(gx + R() * 4 - 2, hem + 5 + R() * 7);
+          g.stroke();
+        }
         peaks.push([cx, topY + 3]);
       };
+
+      const warm = { dark: '#5f594f', mid: '#7e766a', lit: '#a89f8f', spk: '#8d8577' };
+      const cool = { dark: '#565c63', mid: '#747b83', lit: '#9aa2ab', spk: '#848b93' };
       if (v === 0) {
-        peak(20, 26, 42, '#786f63', '#8d8478', 12);
-        peak(56, 4, 52, '#8b8276', '#a2988a', 15);
-        peak(38, 40, 34, '#6e665b', '#7f776b', 9);
+        haze(30, 26, 66); haze(58, 30, 60);
+        peak(20, 30, 46, warm);
+        peak(56, 6, 56, warm);
+        peak(37, 44, 36, { dark: '#544f46', mid: '#6e675c', lit: '#948b7b', spk: '#7e7669' });
       } else {
-        peak(60, 22, 44, '#7a7268', '#8f867a', 12);
-        peak(26, 2, 56, '#8b8276', '#a4998b', 16);
+        haze(46, 22, 78);
+        peak(60, 26, 48, cool);
+        peak(25, 4, 58, cool);
+        peak(44, 48, 32, { dark: '#4d5257', mid: '#676d74', lit: '#8b939b', spk: '#767d85' });
       }
-      // scree + foothill texture
-      p.dither(2, H - 16, W - 4, 14, '#6e695f', 0.25, R);
-      p.dither(4, H - 26, W - 8, 12, '#8a8478', 0.15, R);
+
+      // foothill fringe: mossy mounds, scree, and a stand of pines
+      g.fillStyle = '#57724d';
+      for (let x = -6; x < W + 6; x += 9) {
+        const r = 6 + R() * 5;
+        g.beginPath(); g.ellipse(x + 4, baseY + 4, r, r * 0.55, 0, 0, 7); g.fill();
+      }
+      p.dither(2, baseY - 8, W - 4, 9, '#6e695f', 0.22, R);
+      p.dither(0, baseY - 2, W, 9, '#4c6344', 0.30, R);
+      const pine = (x, y) => {
+        g.fillStyle = '#2e4b34';
+        for (let i = 0; i < 3; i++) {
+          const w2 = 5 - i * 1.4, y2 = y - i * 2.6;
+          g.beginPath(); g.moveTo(x, y2 - 3); g.lineTo(x - w2 / 2, y2); g.lineTo(x + w2 / 2, y2); g.closePath(); g.fill();
+        }
+        g.fillStyle = '#5d4630'; g.fillRect(x - 0.5, y + 0.5, 1, 2);
+      };
+      for (let i = 0; i < 9; i++) pine(4 + R() * (W - 8), baseY + 1 + R() * 5);
+
       // winding hiking trail up the tallest peak
       const main = peaks.reduce((a, b) => (a[1] < b[1] ? a : b));
-      g.strokeStyle = 'rgba(212,196,160,0.5)'; g.lineWidth = 1;
+      g.strokeStyle = 'rgba(214,199,164,0.55)'; g.lineWidth = 1;
       g.beginPath();
-      g.moveTo(main[0] + 18, H - 6);
-      g.quadraticCurveTo(main[0] - 16, H - 30, main[0] + 10, H - 46);
-      g.quadraticCurveTo(main[0] + 18, main[1] + 24, main[0], main[1] + 6);
+      g.moveTo(main[0] + 16, H - 8);
+      g.quadraticCurveTo(main[0] - 18, H - 34, main[0] + 10, H - 52);
+      g.quadraticCurveTo(main[0] + 20, main[1] + 26, main[0], main[1] + 6);
       g.stroke();
+
       this.mountains.push({ img: p.c, oy: EX, peaks });
     }
     this.mountain = this.mountains[0];
