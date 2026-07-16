@@ -20,25 +20,30 @@ const CAR_MIN_DIST = 14; // trips longer than this use the family car
 const WAGES = { office: 22, skyscraper: 28, factory: 18, farm: 12, shop: 13, market: 14, mall: 16, restaurant: 14, cafe: 12, bakery: 12, hotel: 15, bank: 24, gas: 12, school: 18, college: 20, hospital: 22, police: 19, fire: 19, townhall: 20, courthouse: 22, temple: 10, library: 14, amusement: 15, stadium: 16, cinema: 14, theater: 14, museum: 15, gym: 13, pool: 12, airport: 20,
   deptstore: 16, pharmacy: 16, barber: 12, florist: 12, bookshop: 13, butcher: 14, tailor: 13, electronics: 16, toyshop: 13, jeweler: 18, petshop: 12, hardware: 14, furniture: 15, icecream: 11, pizzeria: 13, arcade: 13, laundry: 11, autoshop: 15,
   steelworks: 22, sawmill: 16, brickworks: 16, textilemill: 14, cannery: 15, glassworks: 17, warehouse: 14, powerplant: 24,
-  taxistand: 13, trainstation: 16, dock: 15, heliport: 20, postoffice: 14, zoo: 14 };
+  taxistand: 13, trainstation: 16, dock: 15, heliport: 20, postoffice: 14, zoo: 14,
+  casino: 16, burgerpalace: 12, goldenarches: 12, crispycluck: 12, tacobelle: 12, pizzapalace: 13,
+  carshowroom: 18, motoshowroom: 15, teastall: 8, fishmarket: 13, boatclub: 12, tvstation: 18, exchange: 26, watertower: 12 };
 const PRICES = { shop: 5, market: 7, mall: 10, bakery: 4, cafe: 5, restaurant: 12, cinema: 8, theater: 9, museum: 6, amusement: 13, stadium: 10, gym: 5, pool: 4, hotel: 15, library: 0, temple: 0, park: 0, playground: 0,
   deptstore: 9, pharmacy: 6, barber: 7, florist: 6, bookshop: 7, butcher: 8, tailor: 9, electronics: 14, toyshop: 8, jeweler: 20, petshop: 7, hardware: 9, furniture: 15, icecream: 4, pizzeria: 7, arcade: 6, laundry: 4, autoshop: 12,
-  zoo: 9, plaza: 0, grandpark: 0 };
+  zoo: 9, plaza: 0, grandpark: 0,
+  casino: 5, burgerpalace: 7, goldenarches: 7, crispycluck: 7, tacobelle: 6, pizzapalace: 8,
+  teastall: 2, fishmarket: 7, boatclub: 8, carshowroom: 0, motoshowroom: 0 };
 
 /* A resident is more than a worker slot.  These profiles drive savings,
    ambitions, and the occasional risky choice without making crime common. */
 const ADULT_LIFESTYLES = [
-  { id: 'worker', weight: 44, aspiration: 'career', saveRate: 0.22, funding: 'wages' },
+  { id: 'worker', weight: 40, aspiration: 'career', saveRate: 0.22, funding: 'wages' },
   { id: 'shopkeeper', weight: 15, aspiration: 'business', saveRate: 0.46, funding: 'wages',
-    kinds: ['shop', 'bakery', 'cafe', 'florist', 'barber', 'bookshop', 'butcher', 'icecream', 'laundry', 'petshop', 'toyshop'] },
+    kinds: ['shop', 'bakery', 'cafe', 'florist', 'barber', 'bookshop', 'butcher', 'icecream', 'laundry', 'petshop', 'toyshop', 'teastall', 'fishmarket'] },
   { id: 'entrepreneur', weight: 14, aspiration: 'business', saveRate: 0.5, funding: 'wages',
-    kinds: ['shop', 'cafe', 'bakery', 'market', 'pharmacy', 'tailor', 'hardware', 'electronics', 'pizzeria', 'furniture', 'autoshop', 'arcade', 'gym', 'jeweler'] },
+    kinds: ['shop', 'cafe', 'bakery', 'market', 'pharmacy', 'tailor', 'hardware', 'electronics', 'pizzeria', 'furniture', 'autoshop', 'arcade', 'gym', 'jeweler', 'gas', 'tacobelle', 'motoshowroom', 'boatclub'] },
   { id: 'tycoon', weight: 6, aspiration: 'business', saveRate: 0.55, funding: 'loan',
-    kinds: ['deptstore', 'hotel', 'restaurant', 'cinema', 'mall'] },
+    kinds: ['deptstore', 'hotel', 'restaurant', 'cinema', 'mall', 'casino', 'carshowroom', 'burgerpalace', 'goldenarches', 'crispycluck', 'pizzapalace', 'office', 'skyscraper'] },
   { id: 'industrialist', weight: 5, aspiration: 'business', saveRate: 0.52, funding: 'loan',
-    kinds: ['sawmill', 'brickworks', 'textilemill', 'cannery', 'glassworks', 'warehouse', 'factory'] },
-  { id: 'neighbor', weight: 10, aspiration: 'community', saveRate: 0.26, funding: 'wages' },
-  { id: 'risk-taker', weight: 6, aspiration: 'business', saveRate: 0.38, funding: 'risk', kinds: ['shop', 'cafe', 'market', 'arcade', 'pizzeria'] },
+    kinds: ['sawmill', 'brickworks', 'textilemill', 'cannery', 'glassworks', 'warehouse', 'factory', 'steelworks', 'powerplant', 'dock'] },
+  { id: 'farmer', weight: 6, aspiration: 'business', saveRate: 0.42, funding: 'wages', kinds: ['farm'] },
+  { id: 'neighbor', weight: 8, aspiration: 'community', saveRate: 0.26, funding: 'wages' },
+  { id: 'risk-taker', weight: 6, aspiration: 'business', saveRate: 0.38, funding: 'risk', kinds: ['shop', 'cafe', 'market', 'arcade', 'pizzeria', 'teastall'] },
 ];
 const STARTUP_COSTS = {
   shop: 210, cafe: 230, bakery: 220, market: 320,
@@ -46,6 +51,10 @@ const STARTUP_COSTS = {
   pharmacy: 300, tailor: 200, hardware: 300, electronics: 380, pizzeria: 260, furniture: 400, autoshop: 350, arcade: 380, gym: 320, jeweler: 420,
   deptstore: 900, hotel: 1100, restaurant: 340, cinema: 760, mall: 1400,
   sawmill: 520, brickworks: 540, textilemill: 580, cannery: 500, glassworks: 560, warehouse: 400, factory: 640,
+  teastall: 90, fishmarket: 260, boatclub: 300, gas: 380, farm: 300,
+  burgerpalace: 520, goldenarches: 540, crispycluck: 500, tacobelle: 460, pizzapalace: 480,
+  casino: 1300, carshowroom: 900, motoshowroom: 520, dock: 360,
+  steelworks: 760, powerplant: 1250, office: 560, skyscraper: 1700,
 };
 
 /* ---------------- twenty-plus honest ways to earn a little money ----------------
@@ -102,6 +111,8 @@ const DEST_EMOJI = {
   tailor: '🧵', electronics: '📺', toyshop: '🧸', jeweler: '💍', petshop: '🐾', hardware: '🔨',
   furniture: '🛋️', icecream: '🍦', pizzeria: '🍕', arcade: '🕹️', laundry: '🧺', autoshop: '🔧',
   zoo: '🦁', plaza: '⛲', grandpark: '🧺',
+  casino: '🎰', burgerpalace: '🍔', goldenarches: '🍟', crispycluck: '🍗', tacobelle: '🌮', pizzapalace: '🍕',
+  teastall: '☕', fishmarket: '🐟', boatclub: '🚣', carshowroom: '🚗', motoshowroom: '🏍️', exchange: '📈',
 };
 
 const Sim = {
@@ -118,6 +129,7 @@ const Sim = {
     this.people = []; this.clock = 7 * 60; this.day = 1; this.nextPid = 1;
     this.safety = 92; this.grandOpening = null; this.completed = [];
     this.growthT = 0; this.nextGrowthDay = 0; this.nextEnterpriseDay = 0;
+    this.stocks = null; this.nextPioneerDay = 0; this.carePulse = 0;
   },
 
   hour() { return Math.floor(this.clock / 60); },
@@ -134,6 +146,7 @@ const Sim = {
     if (b.ruined) return msgs;
     if (d.res === 'family') {
       const weds = b.newlywedIds ? this.people.filter(p => b.newlywedIds.includes(p.id)) : [];
+      const oldHome = b.pendingMoveFrom ? World.buildings.find(o => o.id === b.pendingMoveFrom) : null;
       if (weds.length) { // a couple built this house for themselves
         for (const p of weds) this.moveHomes(p, b);
         b.funds = 40 + Math.random() * 40;
@@ -141,6 +154,16 @@ const Sim = {
         if (d.cars) b.cars.push({ free: true, seed: (Math.random() * 8) | 0 });
         msgs.push(`💑 The ${weds[0].surname} newlyweds moved into their brand-new home!`);
         for (const p of weds) this.planDay(p);
+      } else if (oldHome && oldHome.residents.length) { // a prosperous family upgraded
+        const movers = oldHome.residents.slice();
+        for (const p of movers) this.moveHomes(p, b);
+        b.funds = oldHome.funds; oldHome.funds = 20;
+        b.cars = oldHome.cars; oldHome.cars = [];
+        b.bikes = oldHome.bikes || 0; oldHome.bikes = 0;
+        b.boat = oldHome.boat || false; oldHome.boat = false;
+        b.pendingMoveFrom = null;
+        msgs.push(`🏰 The ${movers[0].surname} family moved into their grand new ${d.name.toLowerCase()} — old house up for new residents!`);
+        for (const p of movers) this.planDay(p);
       } else {
         const fam = this.spawnFamily(b);
         b.funds = (d.rich ? 380 : 40) + Math.random() * 80;
@@ -327,6 +350,14 @@ const Sim = {
         const shopT = worksToday ? 1120 + jit() : 560 + Math.random() * 500;
         add(shopT, this.pickVenue('shop', p), shopT + 30 + Math.random() * 35);
       }
+      // a quick tea (and for some, a smoke) at the corner stall
+      if (Math.random() < 0.3) {
+        const stall = World.buildings.find(v => v.type === 'teastall' && v.connected && !v.construction && !v.ruined);
+        if (stall) {
+          const tt = worksToday ? 430 + jit() : 560 + Math.random() * 300;
+          p.events.push({ t: tt, dest: stall, until: tt + 15 });
+        }
+      }
       // evening out — weather, season and feelings set the mood
       let outP = wkend ? 0.75 : 0.45;
       if (typeof Weather !== 'undefined') {
@@ -337,7 +368,8 @@ const Sim = {
       if ((p.mood === undefined ? 60 : p.mood) < 45) outP *= 1.3; // gloomy people go looking for cheer
       if (Math.random() < outP) {
         const t = 1110 + Math.random() * 120;
-        add(t, this.pickVenue('leisure', p), t + 55 + Math.random() * 50);
+        const gamblerNight = p.seed % 7 === 0 && Math.random() < 0.5; // some hearts race for the tables
+        add(t, this.pickVenue('leisure', p, gamblerNight ? ['casino'] : undefined), t + 55 + Math.random() * 50);
       }
       // a stroll around the block (often with the dog)
       if (Math.random() < 0.4) {
@@ -616,14 +648,50 @@ const Sim = {
       if (b.type === 'house' && !b.upgrading) {
         if (b.level === 1 && b.funds >= 250) { b.funds -= 180; b.upgrading = 240; say(`🔨 The ${name}s are adding a floor to their house`); }
         else if (b.level === 2 && b.funds >= 600) { b.funds -= 420; b.upgrading = 300; say(`🔨 The ${name}s are turning their home into a villa`); }
+        else if (b.level >= 3 && b.funds >= 1600 && Math.random() < 0.08) {
+          // the final rung of the property ladder: a mansion of their own
+          const spot = World.findPlannedSpot('mansion');
+          if (spot) {
+            const mb = World.placeBuilding('mansion', spot.x, spot.y);
+            if (mb) {
+              b.funds -= 1150; mb.pendingMoveFrom = b.id;
+              say(`🏰 The ${name}s broke ground on a MANSION — the whole street came to stare`);
+              World.refreshConnections();
+            }
+          }
+        }
       }
       // more cars as the family prospers (a third for the truly comfortable)
+      // a car showroom in town makes buying easier (and pays the dealer)
+      const showroom = World.buildings.find(o => o.type === 'carshowroom' && o.connected && !o.ruined && !o.construction);
       const adults = b.residents.filter(r => r.kind !== 'kid').length;
       const carCap = b.level >= 3 ? 3 : Math.min(2, adults);
       if (b.cars.length < carCap && b.funds >= (b.cars.length >= 2 ? 550 : 350)) {
-        b.funds -= b.cars.length >= 2 ? 420 : 250;
+        const price = (b.cars.length >= 2 ? 420 : 250) * (showroom ? 0.9 : 1);
+        b.funds -= price;
+        if (showroom) { showroom.funds += price * 0.25; showroom.visitors++; }
         b.cars.push({ free: true, seed: (Math.random() * 8) | 0 });
-        say(b.cars.length >= 3 ? `🚗 The ${name}s added a third car to the driveway — living large!` : `🚗 The ${name}s bought a new car`);
+        say(b.cars.length >= 3 ? `🚗 The ${name}s added a third car to the driveway — living large!`
+          : `🚗 The ${name}s bought a new car${showroom ? ' from the showroom' : ''}`);
+      }
+      // a motorcycle: the working family's first set of wheels
+      const motoShop = World.buildings.find(o => o.type === 'motoshowroom' && o.connected && !o.ruined && !o.construction);
+      if ((b.bikes || 0) < 1 && adults >= 1 && b.funds >= 170 && Math.random() < (motoShop ? 0.3 : 0.12)) {
+        const price = motoShop ? 120 : 145;
+        b.funds -= price; b.bikes = (b.bikes || 0) + 1;
+        if (motoShop) { motoShop.funds += price * 0.3; motoShop.visitors++; }
+        say(`🏍️ The ${name}s bought a motorcycle${motoShop ? ' from the showroom' : ''} — beats walking!`);
+      }
+      // a fishing boat, when the village has a working waterfront
+      const wharf = World.buildings.find(o => ['dock', 'boatclub', 'fishmarket'].includes(o.type) && o.connected && !o.ruined && !o.construction);
+      if (wharf && !b.boat && b.funds >= 300 && Math.random() < 0.05) {
+        b.funds -= 190; b.boat = true;
+        say(`🛶 The ${name}s bought a fishing boat — fresh catch and a little extra income`);
+      }
+      if (b.boat && typeof Weather !== 'undefined' && Weather.season !== 3) {
+        const haul = 3 + Math.random() * 8;
+        b.funds += haul;
+        if (Math.random() < 0.02) say(`🎣 A great haul! The ${name}s sold $${Math.round(haul + 10)} of fish at the market`);
       }
       // property investment: build a rental home
       if (b.level >= 2 && b.funds >= 900 && this.day >= (b.nextInvestmentDay || 0) && Math.random() < 0.14) {
@@ -640,10 +708,225 @@ const Sim = {
         }
       }
     }
+    this.payUtilities();
     this.sideGigs();
     this.tickLoans();
     this.tickBusinessHealth();
     this.advanceAmbitions();
+    this.tickHardship();
+    this.tickWellbeing();
+    this.tickStocks();
+    this.tickPioneers();
+  },
+
+  /* ---------- utilities: power & water bills, once a day ----------
+     Money flows from households to the plant, the pump and the treasury.
+     A big town without utilities is an unhappy one. */
+  payUtilities() {
+    const plant = World.buildings.find(b => b.type === 'powerplant' && b.connected && !b.ruined && !b.construction);
+    const pump = World.buildings.find(b => b.type === 'watertower' && b.connected && !b.ruined && !b.construction);
+    for (const b of World.buildings) {
+      if (!CAT[b.type].res || b.ruined || b.construction || !b.residents.length) continue;
+      if (plant && b.funds > 6) { b.funds -= 2.5; plant.funds += 1.5; if (typeof Gov !== 'undefined') Gov.treasury += 1; }
+      if (pump && b.funds > 4) { b.funds -= 1.5; pump.funds += 0.8; if (typeof Gov !== 'undefined') Gov.treasury += 0.7; }
+      // a large town living without utilities grumbles about it
+      if (this.people.length > 30 && (!plant || !pump)) {
+        for (const r of b.residents) if (Math.random() < 0.15) r.mood = Math.max(5, (r.mood === undefined ? 60 : r.mood) - 1);
+      }
+    }
+  },
+
+  /* ---------- families can go under: broke households leave town ---------- */
+  tickHardship() {
+    const say = m => { if (typeof Life !== 'undefined') Life.say(m); };
+    for (const b of World.buildings.slice()) {
+      const d = CAT[b.type];
+      if (d.res !== 'family' || b.ruined || b.construction || !b.residents.length) continue;
+      const adults = b.residents.filter(r => r.kind !== 'kid');
+      const working = adults.filter(r => r.work).length;
+      const savings = adults.reduce((s, r) => s + (r.savings || 0), 0);
+      if (b.funds <= 3 && savings < 10 && !working) b.brokeDays = (b.brokeDays || 0) + 1;
+      else b.brokeDays = 0;
+      if (b.brokeDays === 2) say(`💸 The ${b.residents[0].surname}s can't pay their bills — the cupboard is bare`);
+      if (b.brokeDays >= 2) for (const r of b.residents) r.mood = Math.max(5, (r.mood === undefined ? 60 : r.mood) - 6);
+      if (b.brokeDays >= 5 && Math.random() < 0.4) {
+        const name = b.residents[0].surname;
+        say(`📦 Broke and out of options, the ${name} family packed up and left the village…`);
+        for (const r of b.residents.slice()) this.removePerson(r, true);
+        b.brokeDays = 0; b.funds = 0; b.cars = []; b.bikes = 0; b.boat = false;
+        for (const p of this.people)
+          if (Math.abs(p.home.x - b.x) + Math.abs(p.home.y - b.y) < 14)
+            p.mood = Math.max(5, (p.mood === undefined ? 60 : p.mood) - 4);
+      }
+    }
+  },
+
+  /* ---------- despair, and the village that answers it ----------
+     Long stretches of very low mood become a visible crisis. Nearly always
+     the village catches its own: partners, counsellors, neighbours. People
+     may leave to start over; the darkest outcome is possible but rare, and
+     it changes the town — grief turns into looking out for one another. */
+  tickWellbeing() {
+    const say = m => { if (typeof Life !== 'undefined') Life.say(m); };
+    for (const p of this.people.slice()) {
+      if (p.kind === 'kid') continue;
+      const m = p.mood === undefined ? 60 : p.mood;
+      p.lowDays = m < 24 ? (p.lowDays || 0) + 1 : 0;
+      if (p.lowDays === 3) say(`💭 ${this.fullName(p)} has been withdrawn for days — the neighbours are starting to worry`);
+      if (p.lowDays >= 5) {
+        p.lowDays = 0;
+        const support = World.buildings.some(b => ['hospital', 'temple'].includes(b.type) && b.connected && !b.ruined && !b.construction);
+        const partner = p.partnerId && this.people.some(q => q.id === p.partnerId);
+        if (support || partner || Math.random() < 0.45) {
+          p.mood = 58; p.funDay = this.day;
+          say(`🤝 ${this.fullName(p)} hit rock bottom — ${partner ? 'family' : support ? 'counsellors' : 'friends'} rallied around them, and there is light again`);
+        } else if (Math.random() < 0.55) {
+          say(`🚪 ${this.fullName(p)} quietly left the village to start over somewhere new`);
+          this.removePerson(p, true);
+        } else if (this.people.length >= 18 && Math.random() < 0.3) {
+          say(`🕯️ Heartbreak: ${this.fullName(p)} lost their battle with despair. The whole village gathers to mourn — and vows to look out for one another`);
+          for (const q of this.people) q.mood = Math.max(5, (q.mood === undefined ? 60 : q.mood) - 10);
+          this.removePerson(p, true);
+          this.carePulse = this.day + 4; // grief becomes care
+        } else {
+          p.mood = 42;
+          say(`🌱 ${this.fullName(p)} found new purpose after a dark stretch — starting small, one day at a time`);
+        }
+      }
+      if (this.carePulse && this.day <= this.carePulse && m < 40)
+        p.mood = Math.min(98, m + 8); // the whole village checks on its lowest
+    }
+  },
+
+  /* ---------- casino: the house usually wins ---------- */
+  gamble(p, casino) {
+    const stake = Math.min(p.home.funds * 0.25, 4 + Math.random() * 18 + (p.seed % 9 === 0 ? 20 : 0));
+    if (stake < 2 || p.home.funds <= stake) return;
+    p.home.funds -= stake;
+    const say = m => { if (typeof Life !== 'undefined') Life.say(m); };
+    if (Math.random() < 0.05) { // jackpot
+      const win = stake * (6 + Math.random() * 10);
+      p.home.funds += win;
+      casino.funds = Math.max(0, casino.funds - win * 0.4);
+      p.mood = Math.min(98, (p.mood === undefined ? 60 : p.mood) + 15);
+      say(`🎰 JACKPOT! ${this.fullName(p)} won $${Math.round(win)} at the casino!`);
+    } else if (Math.random() < 0.4) {
+      p.home.funds += stake * 1.6;
+      casino.funds = Math.max(0, casino.funds - stake * 0.6);
+    } else {
+      casino.funds += stake;
+      p.mood = Math.max(5, (p.mood === undefined ? 60 : p.mood) - 3);
+      if (p.home.funds < 15 && Math.random() < 0.35)
+        say(`🎲 ${this.fullName(p)} gambled the family savings away — the ${p.surname}s are in real trouble`);
+    }
+  },
+
+  /* ---------- a small stock market: five hometown tickers ---------- */
+  initStocks() {
+    this.stocks = [
+      { sym: 'AGRI', name: 'Valley Farms Co.', price: 20 + Math.random() * 10, drift: 0, prev: 0 },
+      { sym: 'INDL', name: 'PixelWorks Industries', price: 34 + Math.random() * 12, drift: 0, prev: 0 },
+      { sym: 'RETL', name: 'Main Street Retail', price: 26 + Math.random() * 8, drift: 0, prev: 0 },
+      { sym: 'RAIL', name: 'Village Rail & Transit', price: 18 + Math.random() * 8, drift: 0, prev: 0 },
+      { sym: 'BYTE', name: 'ByteVille Tech', price: 42 + Math.random() * 16, drift: 0, prev: 0 },
+    ];
+  },
+  tickStocks() {
+    if (!this.stocks) this.initStocks();
+    const count = pred => World.buildings.filter(b => !b.ruined && !b.construction && pred(b)).length;
+    const health = {
+      AGRI: count(b => b.type === 'farm'),
+      INDL: count(b => ['factory', 'steelworks', 'sawmill', 'brickworks', 'textilemill', 'cannery', 'glassworks', 'warehouse', 'powerplant'].includes(b.type)),
+      RETL: count(b => CAT[b.type].visit === 'shop'),
+      RAIL: count(b => ['trainstation', 'busstop', 'taxistand', 'airport', 'dock'].includes(b.type)),
+      BYTE: count(b => ['office', 'skyscraper', 'electronics', 'exchange'].includes(b.type)),
+    };
+    let shock = null;
+    for (const s of this.stocks) {
+      s.drift = s.drift * 0.8 + (Math.random() - 0.5) * 0.05;
+      let change = s.drift + Math.min(0.02, health[s.sym] * 0.002) + (Math.random() - 0.5) * 0.09;
+      if (Math.random() < 0.012) { change += Math.random() < 0.5 ? -0.3 : 0.35; shock = s; }
+      s.prev = s.price;
+      s.price = Math.max(2, s.price * (1 + change));
+    }
+    if (shock && typeof Life !== 'undefined') {
+      const up = shock.price > shock.prev;
+      Life.say(`${up ? '📈' : '📉'} Market ${up ? 'rally' : 'shock'}: ${shock.name} (${shock.sym}) ${up ? 'soars' : 'tumbles'} to $${shock.price.toFixed(0)}`);
+    }
+    // villagers with spare savings trade; a stock exchange makes it popular
+    const exchange = World.buildings.find(b => b.type === 'exchange' && b.connected && !b.ruined && !b.construction);
+    for (const p of this.people) {
+      if (p.kind === 'kid') continue;
+      if (!((p.seed % 5 === 0) || (exchange && p.seed % 3 === 0))) continue;
+      if (!p.portfolio) p.portfolio = {};
+      if ((p.savings || 0) > 90 && Math.random() < (exchange ? 0.4 : 0.18)) {
+        const s = this.stocks[(Math.random() * this.stocks.length) | 0];
+        const spend = Math.min(p.savings * 0.3, 40);
+        p.savings -= spend;
+        p.portfolio[s.sym] = (p.portfolio[s.sym] || 0) + spend / s.price;
+        if (exchange) exchange.visitors++;
+      }
+      for (const sym of Object.keys(p.portfolio)) {
+        if (Math.random() > 0.12) continue;
+        const s = this.stocks.find(q => q.sym === sym);
+        const qty = p.portfolio[sym];
+        if (!s || !qty) continue;
+        delete p.portfolio[sym];
+        const value = qty * s.price;
+        p.savings = (p.savings || 0) + value;
+        if (value > 120 && typeof Life !== 'undefined')
+          Life.say(`💹 ${this.fullName(p)} cashed out $${Math.round(value)} from the stock market!`);
+      }
+    }
+  },
+  stockIndex() {
+    if (!this.stocks) return 100;
+    return Math.round(this.stocks.reduce((s, q) => s + q.price, 0));
+  },
+
+  /* ---------- pioneers: some hearts belong to the far countryside ---------- */
+  tickPioneers() {
+    if (this.day < (this.nextPioneerDay || 0) || this.people.length < 14) return;
+    this.nextPioneerDay = this.day + 6 + ((Math.random() * 6) | 0);
+    if (Math.random() < 0.4) return; // not every season produces a dreamer
+    const say = m => { if (typeof Life !== 'undefined') Life.say(m); };
+    const c = typeof Gov !== 'undefined' ? Gov.townCenter() : { x: GW >> 1, y: GH >> 1 };
+    const key = Math.random() < 0.5 ? 'house' : 'cottage';
+    const spot = World.findRemoteSpot(key, c.x, c.y, 42);
+    if (!spot) return;
+    const nb = World.placeBuilding(key, spot.x, spot.y);
+    if (!nb) return;
+    const district = typeof Gov !== 'undefined' ? Gov.districtName(spot.x, spot.y) : 'far countryside';
+    const homes = World.buildings.filter(b => CAT[b.type].res === 'family' && b.residents.length >= 2 && !b.ruined && b !== nb && b.funds > 120);
+    if (homes.length && Math.random() < 0.7) { // an existing family strikes out
+      const from = homes[(Math.random() * homes.length) | 0];
+      const movers = from.residents.slice();
+      for (const mv of movers) this.moveHomes(mv, nb);
+      nb.funds = from.funds * 0.7; from.funds *= 0.3;
+      if (CAT[key].cars) nb.cars.push({ free: true, seed: (Math.random() * 8) | 0 });
+      say(`🌄 The ${movers[0].surname}s left the crowded streets to homestead in the ${district} — pioneers!`);
+    } else {
+      const fam = this.spawnFamily(nb);
+      nb.funds = 90 + Math.random() * 80;
+      if (CAT[key].cars) nb.cars.push({ free: true, seed: (Math.random() * 8) | 0 });
+      say(`🌄 Newcomers! The ${fam.surname} family claimed cheap land in the ${district} and are building a homestead`);
+    }
+    // pioneers often start a farm or a wayside business next to the homestead
+    if (Math.random() < 0.7) {
+      const bizKey = Math.random() < 0.55 ? 'farm' : ['teastall', 'shop', 'gas'][(Math.random() * 3) | 0];
+      for (let tries = 0; tries < 25; tries++) {
+        const bx = spot.x - 10 + ((Math.random() * 20) | 0), by = spot.y - 10 + ((Math.random() * 20) | 0);
+        if (!World.canPlace(bizKey, bx, by)) continue;
+        const biz = World.placeBuilding(bizKey, bx, by);
+        if (biz) {
+          const owner = nb.residents.find(r => r.kind !== 'kid');
+          if (owner) { biz.founderId = owner.id; biz.ownerId = nb.id; owner.ownsBusiness = true; }
+          say(`🏞️ …and they're putting up a ${CAT[bizKey].name.toLowerCase()} out there. The outskirts are coming alive!`);
+        }
+        break;
+      }
+    }
+    World.refreshConnections();
   },
 
   /* ---------- side gigs: everyone can hustle a little ---------- */
@@ -772,18 +1055,29 @@ const Sim = {
     }
 
     if (this.day < this.nextEnterpriseDay) return;
+    const kindCount = k => World.buildings.filter(q => q.type === k && !q.ruined).length;
     const founders = this.people
       .filter(p => p.kind !== 'kid' && p.aspiration === 'business' && !p.ownsBusiness && !p.loan &&
         p.businessKind && p.home.connected && p.heldUntil <= this.day &&
         (p.age === undefined || (p.age >= AGE_ADULT && p.age < AGE_RETIRE)))
       .sort((a, b) => {
-        const ar = this.startupCapital(a) / (STARTUP_COSTS[a.businessKind] || 300);
-        const br = this.startupCapital(b) / (STARTUP_COSTS[b.businessKind] || 300);
-        return br - ar;
+        // capital counts — but bringing the town a trade it has NONE of counts more
+        const score = p => {
+          const n = kindCount(p.businessKind);
+          return this.startupCapital(p) / (STARTUP_COSTS[p.businessKind] || 300) +
+            (n === 0 ? 0.8 : n >= 3 ? -0.6 : 0);
+        };
+        return score(b) - score(a);
       });
     if (!founders.length) return;
 
     const founder = founders[0];
+    // a saturated trade makes a smart founder pivot to whatever is missing
+    if (kindCount(founder.businessKind) >= 3) {
+      const style = ADULT_LIFESTYLES.find(s => s.id === founder.lifestyle);
+      const gaps = style && style.kinds ? style.kinds.filter(k => kindCount(k) === 0) : [];
+      if (gaps.length) founder.businessKind = gaps[(Math.random() * gaps.length) | 0];
+    }
     const kind = founder.businessKind;
     // buying the plot: the government sells land, and prices vary by district
     const spot = World.findPlannedSpot(kind);
@@ -817,7 +1111,8 @@ const Sim = {
     business.founderId = founder.id;
     business.landPrice = landCost;
     founder.ownsBusiness = true;
-    this.nextEnterpriseDay = this.day + 1 + ((Math.random() * 2) | 0);
+    // a bigger town breeds businesses faster: daily openings past ~80 residents
+    this.nextEnterpriseDay = this.day + (this.people.length > 80 ? 0 : 1) + ((Math.random() * 2) | 0);
     World.refreshConnections();
     if (typeof Life !== 'undefined') {
       const district = typeof Gov !== 'undefined' ? Gov.districtName(spot.x, spot.y) : 'town';
@@ -882,7 +1177,7 @@ const Sim = {
     }
     if (this.day < this.nextGrowthDay) return;
     const underCon = World.buildings.filter(b => b.construction > 0 && CAT[b.type].res).length;
-    if (underCon >= 2) return; // two housing projects can run side by side now
+    if (underCon >= 3) return; // a few housing projects can run side by side now
     const vacant = vacantHomes.length;
     const unfilled = s.jobs - s.employed;
     if (unfilled > 3 && vacant === 0 && Math.random() < 0.45) {
@@ -935,7 +1230,7 @@ const Sim = {
         p.bubbleUntil = performance.now() + 1800;
       }
       const t = p.trip;
-      const speed = (t.car || t.taxi) ? CAR_SPEED : WALK_SPEED;
+      const speed = (t.car || t.taxi) ? CAR_SPEED : t.moto ? 1.6 : WALK_SPEED;
       t.prog += speed * dt;
       if (t.prog >= t.path.length - 1) { // arrived
         const dest = p.dest;
@@ -959,6 +1254,7 @@ const Sim = {
               if (owner && owner.residents.length) { owner.funds += price * 0.7; dest.funds += price * 0.3; }
               else dest.funds += price;
             }
+            if (dest.type === 'casino' && p.kind !== 'kid') this.gamble(p, dest);
           }
           if (dest === p.work && p.paidDay !== this.day) { // payday
             p.paidDay = this.day;
@@ -1018,9 +1314,12 @@ const Sim = {
       car = p.home.cars.find(c => c.free) || null;
       if (car) car.free = false;
     }
-    // no family car free? hail a cab from the taxi rank (fare goes to the stand)
+    // no car free? the family motorcycle covers the middle distances
+    let moto = false;
+    if (!car && p.kind !== 'kid' && path.length >= 8 && (p.home.bikes || 0) > 0 && Math.random() < 0.8) moto = true;
+    // still on foot for a long haul? hail a cab (fare goes to the stand)
     let taxi = false;
-    if (!car && p.kind !== 'kid' && path.length >= carMin) {
+    if (!car && !moto && p.kind !== 'kid' && path.length >= carMin) {
       const stand = World.buildings.find(b => b.type === 'taxistand' && b.connected && !b.ruined && !b.construction);
       if (stand && p.home.funds > 6) {
         taxi = true;
@@ -1033,11 +1332,23 @@ const Sim = {
     p.state = 'walk';
     p.dest = dest;
     p.until = until;
-    p.trip = { path, prog: 0, car, taxi };
-    if (!car && p.kind !== 'kid' && Math.random() < 0.15) p.trip.dog = (Math.random() * 2) | 0; // walk the dog
+    p.trip = { path, prog: 0, car, taxi, moto };
+    if (!car && !moto && p.kind !== 'kid' && Math.random() < 0.15) p.trip.dog = (Math.random() * 2) | 0; // walk the dog
     if (dest !== p.home && DEST_EMOJI[dest.type]) {
       p.bubble = DEST_EMOJI[dest.type];
       p.bubbleUntil = performance.now() + 2600;
+    }
+    // running costs: fuel for drives, a small fare for the bus
+    const gas = World.buildings.find(b => b.type === 'gas' && b.connected && !b.ruined && !b.construction);
+    if (gas && (car || moto) && Math.random() < 0.35 && p.home.funds > 4) {
+      const fuel = car ? 1.5 : 0.7;
+      p.home.funds -= fuel; gas.funds += fuel; gas.visitors++;
+    }
+    if (!car && !moto && !taxi && path.length >= 10 && typeof Life !== 'undefined' && Life.buses.length &&
+        p.home.funds > 3 && Math.random() < 0.5) {
+      p.home.funds -= 1; // hops on the bus for part of the way
+      const stop = World.buildings.find(b => b.type === 'busstop' && b.connected && !b.ruined);
+      if (stop) stop.funds += 1;
     }
     const [sx, sy] = path[0];
     p.x = sx * T + 8; p.y = sy * T + 8;

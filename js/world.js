@@ -1,11 +1,11 @@
 /* ============================================================
    PixelVille — world grid, terrain, placement, auto-roads.
-   Ground types: 0 grass, 1 water, 2 rock.
+   Ground types: 0 grass, 1 water, 2 rock, 3 sand (beach).
    ============================================================ */
 'use strict';
 
 const GW = 128, GH = 128;
-const G_GRASS = 0, G_WATER = 1, G_ROCK = 2;
+const G_GRASS = 0, G_WATER = 1, G_ROCK = 2, G_SAND = 3;
 const MSIZE = 5; // mountain footprint (tiles)
 const MIN_PER_SEC = 4; // game-minutes per real second at 1x — one day ≈ 6 real minutes
 
@@ -19,6 +19,7 @@ const World = {
   mountains: [],                       // {x,y} 3x3 rock + peak sprite
   nextId: 1,
   dirty: true,                         // ground layer needs re-render
+  railStamp: 0,                        // bumped on every rail edit (train line re-check)
   onChange: null,                      // callback
 
   idx(x, y) { return y * GW + x; },
@@ -28,7 +29,7 @@ const World = {
 
   reset() {
     this.ground.fill(0); this.tree.fill(0); this.roadMap.fill(0); this.railMap.fill(0); this.bmap.fill(0);
-    this.buildings = []; this.mountains = []; this.nextId = 1; this.dirty = true;
+    this.buildings = []; this.mountains = []; this.nextId = 1; this.dirty = true; this.railStamp++;
   },
 
   /* ---------- initial scenery ---------- */
@@ -53,14 +54,35 @@ const World = {
     // a river across the east side
     this.carveRiver(GW - 10, 2 + Math.floor(R() * 8), 62 + Math.floor(R() * 14), GH - 2, R);
     // imposing mountain range, bottom-left
-    const mx = 10 + Math.floor(R() * 10), my = 78 + Math.floor(R() * 10);
+    const mx = 10 + Math.floor(R() * 10), my = 74 + Math.floor(R() * 8);
     this.placeMountain(mx, my); this.placeMountain(mx + 5, my + 3);
     this.placeMountain(mx + 2, my + 7); this.placeMountain(mx + 8, my - 2);
+    // the sea along the southern edge, with a broad sandy beach
+    this.carveSea(R);
     // country roads entering from the west and the north — visitors arrive along them
     const ry = 58 + Math.floor(R() * 12);
-    for (let x = 0; x < 18; x++) if (this.enterCost(x, ry) !== Infinity) this.setRoad(x, ry);
+    for (let x = 0; x < 18; x++) if (this.enterCost(x, ry) !== Infinity) this.setRoadWide(x, ry, true);
     const rx = 52 + Math.floor(R() * 16);
-    for (let y = 0; y < 14; y++) if (this.enterCost(rx, y) !== Infinity) this.setRoad(rx, y);
+    for (let y = 0; y < 14; y++) if (this.enterCost(rx, y) !== Infinity) this.setRoadWide(rx, y, false);
+    this.dirty = true;
+  },
+
+  /* a sea fills the southern rim; a wavy white-gold beach runs above it */
+  carveSea(R) {
+    R = R || Math.random;
+    const base = GH - 8; // average waterline row
+    for (let x = 0; x < GW; x++) {
+      const wave = Math.sin(x * 0.05) * 2.2 + Math.sin(x * 0.13 + 4) * 1.6;
+      const waterY = Math.round(base + wave);
+      const sandY = waterY - (4 + Math.round(Math.sin(x * 0.045 + 2) * 1.5 + R() * 1.5));
+      for (let y = sandY; y < GH; y++) {
+        if (!this.inB(x, y) || !this.clearForTerrain(x, y)) continue;
+        const i = this.idx(x, y);
+        if (this.ground[i] === G_ROCK) continue;
+        this.ground[i] = y >= waterY ? G_WATER : G_SAND;
+        this.tree[i] = 0;
+      }
+    }
     this.dirty = true;
   },
 
@@ -136,7 +158,9 @@ const World = {
     if (x < 0 || y < 0 || x + d.w > GW || y + d.h + 1 > GH) return false; // +1: door row
     for (let j = 0; j < d.h; j++) for (let i = 0; i < d.w; i++) {
       const k = this.idx(x + i, y + j);
-      if (this.ground[k] !== G_GRASS || this.bmap[k] || this.roadMap[k] || this.railMap[k]) return false;
+      const g = this.ground[k];
+      const groundOk = g === G_GRASS || (d.sandOk && g === G_SAND);
+      if (!groundOk || this.bmap[k] || this.roadMap[k] || this.railMap[k]) return false;
     }
     if (d.needsWater) { // docks must touch water on at least one side
       let wet = false;
@@ -204,7 +228,7 @@ const World = {
     for (let i = 0; i < this.roadMap.length; i++) if (this.roadMap[i]) roads.push(i);
     if (!roads.length) return null;
     const HEAVY = ['factory', 'steelworks', 'sawmill', 'brickworks', 'textilemill', 'cannery',
-      'glassworks', 'warehouse', 'powerplant', 'airport'];
+      'glassworks', 'warehouse', 'powerplant', 'airport', 'farm'];
     const isHeavy = HEAVY.includes(key);
     const isRes = !!d.res;
     const homes = this.buildings.filter(b => CAT[b.type].res && !b.ruined);
@@ -224,7 +248,9 @@ const World = {
         const wx = i % GW, wy = (i / GW) | 0;
         for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
           const nx = wx + dx, ny = wy + dy;
-          if (this.inB(nx, ny) && this.ground[this.idx(nx, ny)] === G_GRASS) { shoreline.push([nx, ny]); break; }
+          if (!this.inB(nx, ny)) continue;
+          const ng = this.ground[this.idx(nx, ny)];
+          if (ng === G_GRASS || (d.sandOk && ng === G_SAND)) { shoreline.push([nx, ny]); break; }
         }
       }
       if (!shoreline.length) return null;
@@ -268,12 +294,34 @@ const World = {
     return bestSpot || this.findBuildSpot(key);
   },
 
+  /* pioneers strike out for the far countryside: a buildable plot at least
+     `minDist` manhattan-tiles from (cx, cy) whose door a road can reach */
+  findRemoteSpot(key, cx, cy, minDist) {
+    const d = CAT[key];
+    if (!d || !d.draw) return null;
+    let best = null, bestD = -1;
+    for (let tries = 0; tries < 300; tries++) {
+      const x = 2 + ((Math.random() * (GW - d.w - 4)) | 0);
+      const y = 2 + ((Math.random() * (GH - d.h - 5)) | 0);
+      const dist = Math.abs(x - cx) + Math.abs(y - cy);
+      if (dist < minDist) continue;
+      if (!this.canPlace(key, x, y)) continue;
+      if (this.enterCost(x + (d.w >> 1), y + d.h) === Infinity) continue;
+      if (dist > bestD) { bestD = dist; best = { x, y }; }
+      if (best && tries > 120) break; // good enough — pioneers aren't picky
+    }
+    return best;
+  },
+
   /* ---------- railway ---------- */
   setRail(x, y) {
     if (!this.inB(x, y)) return;
     const i = this.idx(x, y);
-    if (this.bmap[i] || this.ground[i] !== G_GRASS && !this.roadMap[i]) return; // grass or level crossing only
-    this.railMap[i] = 1; this.tree[i] = 0;
+    if (this.railMap[i]) return;
+    // rails cross grass, sand and roads (level crossings) and BRIDGE water
+    // on trestles — only rock and buildings stop the line
+    if (this.bmap[i] || this.ground[i] === G_ROCK) return;
+    this.railMap[i] = 1; this.tree[i] = 0; this.railStamp++;
     this.dirty = true;
   },
   layRailLine(x0, y0, x1, y1) {
@@ -292,6 +340,78 @@ const World = {
   railPath(ax, ay, bx, by) {
     if (!this.isRail(ax, ay) || !this.isRail(bx, by)) return null;
     return this._bfs(ax, ay, bx, by, (x, y) => this.isRail(x, y));
+  },
+
+  /* ---------- government railway builder ----------
+     Lays a full track between two tiles, routing around rock and
+     buildings, bridging water and crossing roads. Returns tile count
+     laid, or -1 when no route exists. */
+  railEnterCost(x, y) {
+    if (!this.inB(x, y)) return Infinity;
+    const i = this.idx(x, y);
+    if (this.bmap[i]) return Infinity;
+    if (this.railMap[i]) return 0.1;   // reuse existing track
+    const g = this.ground[i];
+    if (g === G_ROCK) return Infinity;
+    if (g === G_WATER) return 5;       // trestle bridges are expensive
+    if (this.roadMap[i]) return 2.5;   // level crossings disliked
+    return this.tree[i] ? 1.8 : 1;
+  },
+  connectRail(x0, y0, x1, y1) {
+    if (this.railEnterCost(x0, y0) === Infinity || this.railEnterCost(x1, y1) === Infinity) return -1;
+    const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    const NS = GW * GH * 4;
+    const dist = new Float64Array(NS).fill(Infinity);
+    const prev = new Int32Array(NS).fill(-1);
+    const heap = [];
+    const push = (c, s) => {
+      heap.push([c, s]);
+      let i = heap.length - 1;
+      while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; }
+    };
+    const pop = () => {
+      const top = heap[0], last = heap.pop();
+      if (heap.length) {
+        heap[0] = last;
+        let i = 0;
+        for (;;) {
+          let m = i; const l = 2 * i + 1, r = l + 1;
+          if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
+          if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
+          if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m;
+        }
+      }
+      return top;
+    };
+    for (let d = 0; d < 4; d++) { const s = this.idx(x0, y0) * 4 + d; dist[s] = 0; push(0, s); }
+    const goalTile = this.idx(x1, y1);
+    let goal = -1;
+    while (heap.length) {
+      const [c, s] = pop();
+      if (c > dist[s]) continue;
+      const tile = s >> 2, sd = s & 3;
+      if (tile === goalTile) { goal = s; break; }
+      const tx = tile % GW, ty = (tile / GW) | 0;
+      for (let nd = 0; nd < 4; nd++) {
+        const nx = tx + DIRS[nd][0], ny = ty + DIRS[nd][1];
+        const ec = this.railEnterCost(nx, ny);
+        if (ec === Infinity) continue;
+        const turn = nd === sd ? 0 : 1.4; // railways love straight lines
+        const ns = this.idx(nx, ny) * 4 + nd;
+        const ncost = c + ec + turn;
+        if (ncost < dist[ns]) { dist[ns] = ncost; prev[ns] = s; push(ncost, ns); }
+      }
+    }
+    if (goal < 0) return -1;
+    let laid = 0, s = goal;
+    while (s >= 0) {
+      const tile = s >> 2;
+      const tx = tile % GW, ty = (tile / GW) | 0;
+      if (!this.railMap[tile]) laid++;
+      this.setRail(tx, ty);
+      s = prev[s];
+    }
+    return laid;
   },
   /* boats & ferries steam along connected water */
   waterPath(ax, ay, bx, by) {
@@ -359,6 +479,7 @@ const World = {
     const g = this.ground[i];
     if (g === G_ROCK) return Infinity;
     if (g === G_WATER) return 7;
+    if (g === G_SAND) return 1.5;
     return this.tree[i] ? 1.8 : 1;
   },
 
@@ -372,13 +493,13 @@ const World = {
     if (this.isRoad(dx, dy)) return true;
     if (this.enterCost(dx, dy) === Infinity) return false;
 
-    if (!this.anyRoadExists()) { // seed the first road segment
-      this.setRoad(dx, dy);
+    if (!this.anyRoadExists()) { // seed the first road segment (a proper avenue)
+      this.setRoadWide(dx, dy, true);
       for (const dir of [-1, 1]) {
         for (let s = 1; s <= 3; s++) {
           const x = dx + dir * s;
           if (this.inB(x, dy) && this.enterCost(x, dy) <= 1.8 && this.ground[this.idx(x, dy)] === G_GRASS)
-            this.setRoad(x, dy);
+            this.setRoadWide(x, dy, true);
           else break;
         }
       }
@@ -433,11 +554,12 @@ const World = {
       }
     }
     if (goal < 0) return false;
-    // trace back, lay road
+    // trace back, lay a two-lane road (the direction of travel tells us
+    // which side to widen toward)
     let s = goal;
     while (s >= 0) {
-      const tile = s >> 2;
-      this.setRoad(tile % GW, (tile / GW) | 0);
+      const tile = s >> 2, sd = s & 3;
+      this.setRoadWide(tile % GW, (tile / GW) | 0, sd === 1 || sd === 3);
       s = prev[s];
     }
     return true;
@@ -451,11 +573,19 @@ const World = {
     this.dirty = true;
   },
 
+  /* every road is a two-tile-wide avenue: lay the tile plus its partner
+     lane (south of horizontal runs, east of vertical runs) */
+  setRoadWide(x, y, horizontal) {
+    this.setRoad(x, y);
+    const wx = horizontal ? x : x + 1, wy = horizontal ? y + 1 : y;
+    if (this.enterCost(wx, wy) !== Infinity) this.setRoad(wx, wy);
+  },
+
   /* manual road drag: L-shaped (horizontal then vertical) */
   layRoadLine(x0, y0, x1, y1) {
     const sx = Math.sign(x1 - x0) || 1, sy = Math.sign(y1 - y0) || 1;
-    for (let x = x0; x !== x1 + sx; x += sx) if (this.enterCost(x, y0) !== Infinity) this.setRoad(x, y0);
-    for (let y = y0; y !== y1 + sy; y += sy) if (this.enterCost(x1, y) !== Infinity) this.setRoad(x1, y);
+    for (let x = x0; x !== x1 + sx; x += sx) if (this.enterCost(x, y0) !== Infinity) this.setRoadWide(x, y0, true);
+    for (let y = y0; y !== y1 + sy; y += sy) if (this.enterCost(x1, y) !== Infinity) this.setRoadWide(x1, y, false);
   },
 
   /* after road edits, re-check which buildings' doors touch roads */
@@ -468,7 +598,7 @@ const World = {
     const b = this.buildingAt(x, y);
     if (b) { this.removeBuilding(b); return { kind: 'building', b }; }
     const i = this.idx(x, y);
-    if (this.railMap[i]) { this.railMap[i] = 0; this.dirty = true; return { kind: 'rail' }; }
+    if (this.railMap[i]) { this.railMap[i] = 0; this.railStamp++; this.dirty = true; return { kind: 'rail' }; }
     if (this.roadMap[i]) { this.roadMap[i] = 0; this.dirty = true; this.refreshConnections(); return { kind: 'road' }; }
     if (this.tree[i]) { this.tree[i] = 0; this.dirty = true; return { kind: 'tree' }; }
     if (this.ground[i] === G_WATER) { this.ground[i] = G_GRASS; this.dirty = true; return { kind: 'water' }; }
@@ -521,6 +651,18 @@ const World = {
     return path;
   },
 
+  /* nearest road tile to (x,y) within radius r — incident sites sit half a
+     lane off the grid, so dispatch targets must snap back onto real asphalt */
+  nearestRoad(x, y, r) {
+    if (this.isRoad(x, y)) return { x, y };
+    for (let d = 1; d <= r; d++)
+      for (let j = -d; j <= d; j++) for (let i = -d; i <= d; i++) {
+        if (Math.max(Math.abs(i), Math.abs(j)) !== d) continue;
+        if (this.isRoad(x + i, y + j)) return { x: x + i, y: y + j };
+      }
+    return null;
+  },
+
   roadMask(x, y) {
     let m = 0;
     if (this.isRoad(x, y - 1)) m |= 1;
@@ -556,6 +698,14 @@ const World = {
       const d = CAT[bs.t];
       if (!d) continue;
       if (bs.x + d.w > GW || bs.y + d.h + 1 > GH) continue; // old smaller-map safety
+      // building footprints have grown between versions: skip anything that
+      // would now overlap an already-restored neighbour or blocked ground
+      let clear = true;
+      for (let j = 0; j < d.h && clear; j++) for (let i = 0; i < d.w; i++) {
+        const k = this.idx(bs.x + i, bs.y + j);
+        if (this.bmap[k] || this.ground[k] === G_ROCK || this.ground[k] === G_WATER) { clear = false; break; }
+      }
+      if (!clear) continue;
       const b = {
         id: this.nextId++, type: bs.t, x: bs.x, y: bs.y, w: d.w, h: d.h,
         variant: bs.variant || 0,

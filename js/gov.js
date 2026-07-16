@@ -19,17 +19,19 @@ const LEADER_TYPES = [
   {
     kind: 'visionary', emoji: '💖', zeal: 1.35, skim: 0,
     label: 'a visionary with a pure heart',
-    builds: ['park', 'school', 'library', 'playground', 'hospital', 'pool', 'grandpark', 'plaza', 'zoo'],
+    builds: ['park', 'school', 'library', 'playground', 'hospital', 'pool', 'grandpark', 'plaza', 'zoo',
+      'temple', 'museum', 'theater', 'cinema', 'college'],
   },
   {
     kind: 'business', emoji: '📈', zeal: 1.05, skim: 0.08,
     label: 'a sharp business mind',
-    builds: ['shop', 'market', 'office', 'factory', 'mall', 'bank', 'deptstore', 'trainstation', 'dock'],
+    builds: ['shop', 'market', 'office', 'factory', 'mall', 'bank', 'deptstore', 'trainstation', 'dock',
+      'exchange', 'powerplant', 'skyscraper', 'airport', 'farm'],
   },
   {
     kind: 'steady', emoji: '🧱', zeal: 0.8, skim: 0.03,
     label: 'a careful, dependable planner',
-    builds: ['fire', 'police', 'school', 'park', 'library', 'busstop', 'postoffice'],
+    builds: ['fire', 'police', 'school', 'park', 'library', 'busstop', 'postoffice', 'watertower', 'farm', 'tvstation'],
   },
   {
     kind: 'corrupt', emoji: '🐍', zeal: 0.3, skim: 0.55,
@@ -45,6 +47,9 @@ const CIVIC_COSTS = {
   busstop: 45, taxistand: 70, trainstation: 420, dock: 340, heliport: 560,
   postoffice: 210, plaza: 170, grandpark: 320, zoo: 720, rowhouse: 300,
   courthouse: 420, powerplant: 780, deptstore: 700,
+  watertower: 240, college: 520, temple: 300, museum: 380, cinema: 400, theater: 380,
+  stadium: 950, amusement: 820, airport: 1600, tvstation: 450, exchange: 600,
+  farm: 260, skyscraper: 1200, gym: 260, cafe: 160,
 };
 
 /* how far one station's protection reaches (manhattan tiles); a town that
@@ -82,6 +87,7 @@ const Gov = {
     this.election = null;
     this.campaign = null;
     this.officeTimer = 0;
+    this.nextRailDay = 0;
   },
 
   say(message) { if (typeof Life !== 'undefined') Life.say(message); },
@@ -143,9 +149,16 @@ const Gov = {
       if (!near) uncovered.push(b);
     }
     if (uncovered.length < 7) return null;
-    let sx = 0, sy = 0;
-    for (const b of uncovered) { sx += b.x; sy += b.y; }
-    return { x: Math.round(sx / uncovered.length), y: Math.round(sy / uncovered.length), count: uncovered.length };
+    // aim at the densest uncovered cluster, not the global centroid — a town
+    // with two far-apart gaps used to get stations dropped uselessly between
+    // them, forever "needing" another one
+    let best = null, bestN = -1;
+    for (const b of uncovered) {
+      let n = 0;
+      for (const o of uncovered) if (Math.abs(o.x - b.x) + Math.abs(o.y - b.y) <= 20) n++;
+      if (n > bestN) { bestN = n; best = b; }
+    }
+    return { x: best.x, y: best.y, count: uncovered.length };
   },
 
   activeBuildings(type) {
@@ -514,9 +527,129 @@ const Gov = {
     // an emergency (fire, crime wave) forces an emergency session; otherwise
     // how often the mayor acts depends on their personality
     const urgentNow = this.assessNeedsList().some(n => n === 'fire' || n === 'police');
-    if (Math.random() < (urgentNow ? 0.85 : 0.36 * L.type.zeal)) this.spend();
+    // once the town is big enough for a railway, the treasury saves up for it
+    const savingForRail = Sim.people.length >= 45 && this.countOf('trainstation') === 0 && this.treasury < 1300;
+    if (Math.random() < (urgentNow ? 0.85 : 0.36 * L.type.zeal) && !(savingForRail && !urgentNow && Math.random() < 0.65))
+      this.spend();
+    this.planRailways();
+    this.consolidateServices();
 
     if (this.riotCd > 0) this.riotCd--;
+  },
+
+  /* ---------- the railway programme ----------
+     A growing town's government plans real infrastructure: it places
+     stations by the districts that need them and lays the track itself,
+     bridging rivers on trestles and crossing roads on the way. */
+  planRailways() {
+    const pop = Sim.people.length;
+    if (pop < 40 || Sim.day < (this.nextRailDay || 0)) return;
+    this.nextRailDay = Sim.day + 3;
+    const cost = CIVIC_COSTS.trainstation;
+    const stations = World.buildings.filter(b => b.type === 'trainstation' && !b.ruined);
+    const anchor = st => { // a free (or already-railed) tile beside the station
+      for (let j = -1; j <= st.h; j++) for (let i = -1; i <= st.w; i++) {
+        if (i >= 0 && i < st.w && j >= 0 && j < st.h) continue;
+        const x = st.x + i, y = st.y + j;
+        if (World.inB(x, y) && World.railEnterCost(x, y) !== Infinity) return { x, y };
+      }
+      return null;
+    };
+    // phase 1: the first line — a central station and one for the far district
+    // (also rescues a lone station left stranded by an earlier failed attempt)
+    if (stations.length < 2) {
+      if (this.treasury < cost * (2 - stations.length) + 300) return;
+      const c = this.townCenter();
+      const far = World.buildings.reduce((best, b) => {
+        if (b.ruined || !b.connected || b.type === 'trainstation') return best;
+        const d = Math.abs(b.x - c.x) + Math.abs(b.y - c.y);
+        return (!best || d > best.d) ? { b, d } : best;
+      }, null);
+      if (!far || far.d < 34) return; // town still too compact for a railway
+      let bA = stations[0] || null;
+      if (!bA) {
+        const sA = World.findPlannedSpot('trainstation', c);
+        if (!sA) return;
+        bA = World.placeBuilding('trainstation', sA.x, sA.y);
+        if (!bA) return;
+        this.treasury -= cost;
+      }
+      const sB = World.findPlannedSpot('trainstation', { x: far.b.x, y: far.b.y });
+      const bB = sB ? World.placeBuilding('trainstation', sB.x, sB.y) : null;
+      if (!bB) { World.refreshConnections(); return; }
+      this.treasury -= cost;
+      const aA = anchor(bA), aB = anchor(bB);
+      if (aA && aB) {
+        const laid = World.connectRail(aA.x, aA.y, aB.x, aB.y);
+        if (laid >= 0) {
+          this.treasury = Math.max(0, this.treasury - laid * 2);
+          this.recentBuilds += 2;
+          this.say(`🛤️ Railway programme! Mayor ${this.leader.name} is building two stations and laying track out to the ${this.districtName(sB.x, sB.y)}.`);
+          if (typeof Tasks !== 'undefined') Tasks.add('railway1', '🛤️', 'Open the first railway line');
+          if (typeof Life !== 'undefined') Life.trainT = 0;
+        }
+      }
+      World.refreshConnections();
+      return;
+    }
+    // phase 2: any station standing without track gets connected to the line
+    const hasRail = st => {
+      for (let j = -1; j <= st.h; j++) for (let i = -1; i <= st.w; i++) {
+        if (i >= 0 && i < st.w && j >= 0 && j < st.h) continue;
+        if (World.isRail(st.x + i, st.y + j)) return true;
+      }
+      return false;
+    };
+    const railless = stations.filter(st => !hasRail(st));
+    const railed = stations.filter(st => hasRail(st));
+    if (railless.length && railed.length) {
+      const st = railless[0], other = railed[0];
+      const aA = anchor(st), aB = anchor(other);
+      if (aA && aB) {
+        const laid = World.connectRail(aA.x, aA.y, aB.x, aB.y);
+        if (laid >= 0) {
+          this.treasury = Math.max(0, this.treasury - laid * 2);
+          this.say(`🛤️ Track crews connected the ${this.districtName(st.x, st.y)} station to the main line.`);
+          if (typeof Life !== 'undefined') Life.trainT = 0;
+        }
+      }
+      return;
+    }
+    // phase 3: a busy district far from every station earns a stop of its own
+    if (this.treasury < cost + 250 || stations.length >= 4) return;
+    const remote = [];
+    for (const b of World.buildings) {
+      if (b.ruined || !b.connected) continue;
+      let near = 99;
+      for (const st of stations) near = Math.min(near, Math.abs(b.x - st.x) + Math.abs(b.y - st.y));
+      if (near > 40) remote.push(b);
+    }
+    if (remote.length < 8) return;
+    let sx = 0, sy = 0;
+    for (const b of remote) { sx += b.x; sy += b.y; }
+    const target = { x: Math.round(sx / remote.length), y: Math.round(sy / remote.length) };
+    const spot = World.findPlannedSpot('trainstation', target);
+    if (!spot) return;
+    const nb = World.placeBuilding('trainstation', spot.x, spot.y);
+    if (!nb) return;
+    this.treasury -= cost;
+    const aA = anchor(nb);
+    let best = null, bd = 1e9;
+    for (let i = 0; i < World.railMap.length; i++) {
+      if (!World.railMap[i]) continue;
+      const x = i % GW, y = (i / GW) | 0;
+      const d = Math.abs(x - spot.x) + Math.abs(y - spot.y);
+      if (d < bd) { bd = d; best = { x, y }; }
+    }
+    if (aA && best) {
+      const laid = World.connectRail(aA.x, aA.y, best.x, best.y);
+      if (laid >= 0) {
+        this.treasury = Math.max(0, this.treasury - laid * 2);
+        this.say(`🚉 New rail link! The ${this.districtName(spot.x, spot.y)} is joining the railway network — far places, connected.`);
+        if (typeof Life !== 'undefined') Life.trainT = 0;
+      }
+    }
+    World.refreshConnections();
   },
 
   /* Everything the village currently lacks, most pressing first. Tracking a
@@ -533,8 +666,11 @@ const Gov = {
     if (typeof Life !== 'undefined' && Life.firesRecent >= 0.5 && !this.hasPlanned('fire')) needs.push('fire');
     if (typeof Life !== 'undefined' && Life.crimes >= 2 && !this.hasPlanned('police')) needs.push('police');
     // a growing city needs a station in EVERY district, not just one downtown
-    for (const svc of ['police', 'fire'])
-      if (this.hasPlanned(svc) && !underCon(svc) && this.coverageGap(svc)) needs.push(svc);
+    // — but never more stations than a town this size can staff
+    for (const svc of ['police', 'fire']) {
+      const cap = 1 + Math.floor(pop / 90);
+      if (this.hasPlanned(svc) && !underCon(svc) && this.countOf(svc) < cap && this.coverageGap(svc)) needs.push(svc);
+    }
     if (this.leader && !this.hasPlanned('townhall')) needs.push('townhall');
     if (kids >= 4 && !this.hasPlanned('school')) needs.push('school');
     // crowded classrooms → a second school across town
@@ -562,6 +698,41 @@ const Gov = {
     if (parks < Math.floor(pop / 20)) needs.push('park');
     if (pop >= 40 && !this.hasPlanned('plaza')) needs.push('plaza');
     if (pop >= 55 && !this.hasPlanned('grandpark')) needs.push('grandpark');
+    // food security: the village must grow what it eats
+    const farms = World.buildings.filter(b => b.type === 'farm' && !b.ruined).length;
+    if (pop >= 18 && farms < Math.max(1, Math.ceil(pop / 40)) && !underCon('farm')) needs.push('farm');
+    // utilities: running water, then electric light
+    if (pop >= 26 && !this.hasPlanned('watertower')) needs.push('watertower');
+    if (pop >= 38 && !this.hasPlanned('powerplant')) needs.push('powerplant');
+    // learning, faith & culture as the town matures
+    if (pop >= 35 && !this.hasPlanned('temple')) needs.push('temple');
+    if (pop >= 58 && !this.hasPlanned('college')) needs.push('college');
+    if (pop >= 48 && !this.hasPlanned('cinema')) needs.push('cinema');
+    if (pop >= 64 && !this.hasPlanned('museum')) needs.push('museum');
+    if (pop >= 70 && !this.hasPlanned('theater')) needs.push('theater');
+    // big-ticket dreams for a real town
+    if (pop >= 75 && !this.hasPlanned('amusement')) needs.push('amusement');
+    if (pop >= 90 && !this.hasPlanned('stadium')) needs.push('stadium');
+    if (pop >= 120 && !this.hasPlanned('airport')) needs.push('airport');
+    // media & finance
+    if (pop >= 40 && !this.hasPlanned('tvstation')) needs.push('tvstation');
+    if (pop >= 78 && !this.hasPlanned('exchange')) needs.push('exchange');
+    // a JOBS PROGRAMME: idle hands demand industry — and always a KIND the
+    // town doesn't have yet, so work & industry fills out over time
+    const jobless = Math.max(0, stats.adults - stats.employed);
+    if (jobless > 8) {
+      const industry = ['factory', 'sawmill', 'warehouse', 'brickworks', 'textilemill', 'cannery', 'glassworks', 'steelworks'];
+      const freshInd = industry.filter(k => !this.hasPlanned(k));
+      if (freshInd.length) needs.push(freshInd[Sim.day % freshInd.length]);
+      else if (!underCon('factory') && this.countOf('factory') < 1 + Math.floor(pop / 120)) needs.push('factory');
+    }
+    // main street should carry every trade — fill the gaps one by one
+    if (pop >= 30) {
+      const trades = ['bakery', 'cafe', 'pharmacy', 'butcher', 'barber', 'bookshop', 'hardware',
+        'florist', 'restaurant', 'gas', 'furniture', 'electronics', 'laundry', 'autoshop'];
+      const missing = trades.filter(k => !this.hasPlanned(k));
+      if (missing.length && Math.random() < 0.5) needs.push(missing[Sim.day % missing.length]);
+    }
     return needs;
   },
 
@@ -575,11 +746,16 @@ const Gov = {
     const ignoresNeed = L.type.kind === 'corrupt' ? Math.random() < 0.74 :
       L.type.kind === 'business' ? Math.random() < 0.25 : false;
     if (!key || ignoresNeed) {
-      const choices = L.type.builds.filter(k => !(CAT[k].jobs && this.countOf(k) >= 2));
-      key = choices.length ? choices[(Math.random() * choices.length) | 0] : null;
+      const choices = L.type.builds.filter(k =>
+        this.countOf(k) < Math.min(this.civicCap(k), CAT[k].jobs ? 2 : 99));
+      // variety IS strategy: strongly prefer giving the town something it has none of
+      const fresh = choices.filter(k => this.countOf(k) === 0);
+      const pool = fresh.length && Math.random() < 0.7 ? fresh : choices;
+      key = pool.length ? pool[(Math.random() * pool.length) | 0] : null;
     }
     if (!key) return false;
-    const cost = CIVIC_COSTS[key] || 220;
+    if (this.countOf(key) >= this.civicCap(key)) return false; // the hard rule
+    const cost = CIVIC_COSTS[key] || STARTUP_COSTS[key] || 220;
     if (this.treasury < cost) return false;
     // a station built to close a coverage gap goes INTO the underserved district
     const target = COVERAGE_RADIUS[key] && this.hasPlanned(key) ? this.coverageGap(key) : null;
@@ -599,6 +775,48 @@ const Gov = {
   },
 
   countOf(type) { return World.buildings.filter(b => b.type === type && !b.ruined).length; },
+
+  /* HARD RULE: how many of each civic building this town may ever run.
+     Landmarks stay unique, services scale with population, private
+     commerce may multiply freely. Every public build path checks this. */
+  civicCap(key) {
+    const pop = Sim.people.length;
+    const UNIQUE = ['townhall', 'courthouse', 'airport', 'stadium', 'amusement', 'zoo', 'grandpark',
+      'college', 'exchange', 'tvstation', 'museum', 'theater', 'powerplant', 'heliport', 'casino', 'mall'];
+    if (UNIQUE.includes(key)) return 1;
+    switch (key) {
+      case 'police': case 'fire': return 1 + Math.floor(pop / 90);
+      case 'school': return 1 + Math.floor(pop / 80);
+      case 'hospital': return 1 + Math.floor(pop / 150);
+      case 'watertower': return 1 + Math.floor(pop / 200);
+      case 'temple': case 'cinema': case 'library': case 'postoffice': return 1 + Math.floor(pop / 160);
+      case 'park': return Math.max(2, Math.floor(pop / 20));
+      case 'plaza': case 'playground': case 'pool': case 'gym': return 1 + Math.floor(pop / 120);
+      case 'busstop': return Math.min(8, 1 + Math.floor(pop / 40));
+      case 'taxistand': return 1 + Math.floor(pop / 120);
+      case 'trainstation': return 4;
+      case 'dock': return 2;
+      case 'farm': return Math.max(1, Math.ceil(pop / 40));
+      default: return 99;
+    }
+  },
+
+  /* the hard rule applied retroactively: a town that somehow over-built a
+     service closes the surplus, one review per day, and recovers funds */
+  consolidateServices() {
+    for (const key of ['police', 'fire', 'school', 'hospital', 'watertower']) {
+      const cap = this.civicCap(key) + 1;
+      const list = World.buildings.filter(b => b.type === key && !b.ruined);
+      if (list.length <= cap) continue;
+      const surplus = list.sort((a, b) => b.id - a.id)[0]; // the newest closes first
+      World.removeBuilding(surplus);
+      Sim.onBuildingRemoved(surplus);
+      World.refreshConnections();
+      this.treasury += Math.round((CIVIC_COSTS[key] || 200) * 0.4);
+      this.say(`🏛️ Budget review: a surplus ${CAT[key].name} was decommissioned — one per district is plenty. Funds recovered.`);
+      return;
+    }
+  },
 
   /* ---------- the mayor's office ----------
      An elected mayor needs a town hall: the treasury pays if it can, the
@@ -668,7 +886,8 @@ const Gov = {
   },
 
   communityBuild(need, urgent) {
-    const cost = CIVIC_COSTS[need] || 220;
+    if (this.countOf(need) >= this.civicCap(need)) return false; // the hard rule
+    const cost = CIVIC_COSTS[need] || STARTUP_COSTS[need] || 220;
     const homes = World.buildings.filter(b => CAT[b.type].res && b.residents.length && b.funds > 8 && !b.ruined);
     const pool = homes.reduce((sum, b) => sum + b.funds, 0);
     if (pool < cost * (urgent ? 1.0 : 1.15)) return false; // a poor village needs time to save

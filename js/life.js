@@ -27,6 +27,7 @@ const Life = {
     this.crime = null; this.police = []; this.arrests = 0; this.crimes = 0; this.cooldown = 240;
     this.fireTrucks = []; this.firesRecent = 0; this.buckets = [];
     this.disaster = null; this.collapseCd = 1440;
+    this.dispute = null; this.crash = null; this.incidentCd = 120; this.gawkers = [];
     this.riot = null; this.roadworks = []; this.workT = 200;
     this.rally = null;
     this.buses = []; this.busSig = ''; this.busT = 0;
@@ -35,6 +36,7 @@ const Life = {
     this.helis = []; this.heliCd = 300;
     this.campaignCars = []; this.votingBooths = null;
     this.trials = []; this.graveCases = 0; this.graveCd = 2400; this.graveCrime = null;
+    this.reporters = []; this.beachfolk = []; this.sandTiles = [];
     if (typeof Tasks !== 'undefined') Tasks.reset();
   },
   say(m) { if (this.onEvent) this.onEvent(m); },
@@ -51,6 +53,7 @@ const Life = {
     this.tickPlanes(dtSim, dtReal);
     this.tickWorks(dtSim);
     this.tickIncidents(dtSim);
+    this.tickGawkers(dtSim);
     this.tickDisaster(dtSim);
     this.tickRiot(dtSim);
     this.tickRally(dtSim);
@@ -61,6 +64,62 @@ const Life = {
     this.tickHelis(dtSim, dtReal);
     this.tickCampaignLife(dtSim);
     this.tickJustice(dtSim);
+    this.tickReporters(dtSim);
+    this.tickBeach(dtSim);
+  },
+
+  /* ---------------- the press: PVTV reporters cover every incident ---------------- */
+  reporters: [],
+  coverStory(cx, cy, ref, headline) {
+    const station = World.buildings.find(b => b.type === 'tvstation' && b.connected && !b.construction && !b.ruined);
+    if (!station || this.reporters.length >= 3) return;
+    this.reporters.push({
+      sx: station.door.x * T + 8, sy: station.door.y * T + 8,
+      tx: cx + 10, ty: cy + 6,
+      f: 0, phase: 'come', stay: 30, age: 0, ref: ref || null,
+      seed: (station.id * 131 + this.reporters.length * 17) >>> 0,
+    });
+    if (headline && typeof News !== 'undefined') News.breaking(headline);
+  },
+  tickReporters(dt) {
+    const gm = dt * MIN_PER_SEC;
+    for (const r of this.reporters) {
+      r.age += gm;
+      if (r.phase === 'come') {
+        r.f = Math.min(1, r.f + dt * 0.35);
+        if (r.f >= 1) r.phase = 'report';
+      } else if (r.phase === 'report') {
+        r.stay -= gm;
+        const live = r.ref && !r.ref.over && r.age < 200;
+        if (r.stay <= 0 && !live) r.phase = 'leave';
+      } else {
+        r.f -= dt * 0.3;
+      }
+    }
+    this.reporters = this.reporters.filter(r => r.phase !== 'leave' || r.f > 0);
+  },
+
+  /* ---------------- beach days: towels, umbrellas & waders on the sand ---------------- */
+  beachfolk: [], sandTiles: [],
+  tickBeach(dt) {
+    const warm = Weather.season <= 1 && !Weather.isRaining();
+    const daytime = Sim.clock > 540 && Sim.clock < 1140;
+    const want = (warm && daytime && this.sandTiles.length > 20)
+      ? Math.min(14, 2 + (Sim.people.length / 6 | 0)) : 0;
+    while (this.beachfolk.length < want) {
+      const [tx, ty] = this.sandTiles[(Math.random() * this.sandTiles.length) | 0];
+      this.beachfolk.push({
+        x: tx * T + 3 + Math.random() * 10, y: ty * T + 3 + Math.random() * 10,
+        seed: (Math.random() * 1e6) | 0,
+        kind: ['man', 'woman', 'kid'][(Math.random() * 3) | 0],
+        mode: Math.random() < 0.4 ? 'towel' : Math.random() < 0.5 ? 'stand' : 'wade',
+        towelC: ['#e05a5a', '#4f9ed0', '#f2c14f', '#5fae62'][(Math.random() * 4) | 0],
+        umbrella: Math.random() < 0.45,
+        ph: Math.random() * 7,
+      });
+    }
+    if (this.beachfolk.length > want) this.beachfolk.length = want;
+    for (const bf of this.beachfolk) bf.ph += dt;
   },
 
   /* ---------------- election rallies & celebrations ---------------- */
@@ -168,6 +227,7 @@ const Life = {
         if (typeof Tasks !== 'undefined') Tasks.add('fire' + b.id, '🔥', `Put out the fire at the ${CAT[b.type].name}`);
         if (typeof Snd !== 'undefined') Snd.siren();
         this.dispatchFire(b, true);
+        this.coverStory(b.x * T + b.w * 8, (b.y + b.h) * T, b, `Fire at the ${CAT[b.type].name} — crews responding`);
       }
     }
     // burn down
@@ -295,35 +355,74 @@ const Life = {
 
   /* ---------------- trains on player-laid rails ---------------- */
   trains: [], trainSig: '', trainT: 0,
-  stationRailDoor(st) {
+  /* every rail tile touching the station — a station can face several tracks,
+     and only one of them may lead to the other station */
+  stationRailDoors(st) {
+    const doors = [];
     for (let j = -1; j <= st.h; j++) for (let i = -1; i <= st.w; i++) {
       if (i >= 0 && i < st.w && j >= 0 && j < st.h) continue;
-      if (World.isRail(st.x + i, st.y + j)) return { x: st.x + i, y: st.y + j };
+      if (World.isRail(st.x + i, st.y + j)) doors.push({ x: st.x + i, y: st.y + j });
     }
-    return null;
+    return doors;
   },
+  stationRailDoor(st) { return this.stationRailDoors(st)[0] || null; },
   tickTrains(dt) {
     const gm = dt * MIN_PER_SEC;
     this.trainT -= gm;
     if (this.trainT <= 0) {
       this.trainT = 120;
       const stations = World.buildings.filter(b => b.type === 'trainstation' && !b.construction && !b.ruined);
-      let rails = 0;
-      for (let i = 0; i < World.railMap.length; i++) rails += World.railMap[i];
-      const sig = stations.map(s => s.id).join(',') + '|' + rails;
+      const industry = World.buildings.some(b =>
+        ['factory', 'steelworks', 'warehouse', 'sawmill', 'brickworks', 'cannery', 'glassworks', 'powerplant'].includes(b.type) &&
+        !b.construction && !b.ruined);
+      const sig = stations.map(s => s.id).join(',') + '|' + World.railStamp + '|' + (industry ? 'f' : '');
       if (sig !== this.trainSig) {
         this.trainSig = sig;
+        const hadTrain = this.trains.length > 0;
         this.trains = [];
-        const doors = stations.map(s => ({ s, d: this.stationRailDoor(s) })).filter(o => o.d);
-        if (doors.length >= 2) {
-          // grow the longest chain of stations that the rails actually connect;
-          // stations on disconnected track are simply skipped
-          let bestRoute = null, bestCount = 0;
-          for (let start = 0; start < doors.length; start++) {
-            const left = doors.slice();
-            let cur = left.splice(start, 1)[0];
-            let route = [[cur.d.x, cur.d.y]];
-            let count = 1;
+        if (stations.length >= 2) {
+          // label each connected piece of track; "connected stations" then
+          // simply means "stations touching the same piece"
+          const comp = new Int32Array(GW * GH).fill(-1);
+          let nc = 0;
+          for (let i = 0; i < World.railMap.length; i++) {
+            if (!World.railMap[i] || comp[i] !== -1) continue;
+            const q = [i]; comp[i] = nc;
+            let qi = 0;
+            while (qi < q.length) {
+              const cur = q[qi++], cx = cur % GW, cy = (cur / GW) | 0;
+              for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+                if (!World.isRail(cx + dx, cy + dy)) continue;
+                const ni = World.idx(cx + dx, cy + dy);
+                if (comp[ni] === -1) { comp[ni] = nc; q.push(ni); }
+              }
+            }
+            nc++;
+          }
+          const perComp = new Map(); // component id -> [{s, d}] stations on it
+          let railless = 0;
+          for (const s of stations) {
+            const doors = this.stationRailDoors(s);
+            if (!doors.length) { railless++; continue; }
+            const seen = new Set();
+            for (const d of doors) {
+              const c = comp[World.idx(d.x, d.y)];
+              if (seen.has(c)) continue;
+              seen.add(c);
+              if (!perComp.has(c)) perComp.set(c, []);
+              perComp.get(c).push({ s, d });
+            }
+          }
+          let best = null;
+          for (const list of perComp.values())
+            if (!best || list.length > best.length) best = list;
+          if (best && best.length >= 2) {
+            // chain the stations along the track, nearest-first; every path
+            // exists because they all sit on the same piece of track
+            const left = best.slice();
+            let cur = left.shift();
+            let route = [[cur.d.x, cur.d.y]], served = 1;
+            const stopIdx = [0];
             while (left.length) {
               let picked = -1, seg = null;
               for (let i = 0; i < left.length; i++) {
@@ -332,28 +431,50 @@ const Life = {
               }
               if (picked < 0) break;
               route = route.concat(seg.slice(1));
+              stopIdx.push(route.length - 1);
               cur = left.splice(picked, 1)[0];
-              count++;
+              served++;
             }
-            if (count > bestCount || (count === bestCount && bestRoute && route.length > bestRoute.length)) {
-              bestCount = count; bestRoute = route;
+            if (served >= 2 && route.length >= 2) {
+              // a fleet grows with the line: the local calls at every station,
+              // an express dashes end-to-end, freight rumbles through for industry.
+              // Each service runs on its OWN track of the three-track mainline
+              // (lane = px offset onto its rails), so trains never overlap.
+              const mk = (type, speed, cars, prog) => ({
+                route, stopIdx: type === 'local' ? stopIdx : [0, route.length - 1],
+                prog: prog || 0, dir: 1, pause: 8, type, speed, cars, lastStop: -1,
+                lane: type === 'express' ? -5 : type === 'freight' ? 5 : 0,
+                x: route[0][0] * T + 8, y: route[0][1] * T + 8, dirx: 1, diry: 0,
+              });
+              this.trains.push(mk('local', 4.2, 3, 0));
+              if (served >= 3 && route.length > 26) this.trains.push(mk('express', 6.4, 2, (route.length - 1) * 0.5));
+              if (industry && route.length > 18) this.trains.push(mk('freight', 3.1, 4, (route.length - 1) * 0.82));
+              if (!hadTrain || served > 2) {
+                const extra = [];
+                if (this.trains.some(t2 => t2.type === 'express')) extra.push('an express');
+                if (this.trains.some(t2 => t2.type === 'freight')) extra.push('a freight run');
+                this.say(`🚂 All aboard! The railway serves ${served} station${served > 1 ? 's' : ''}${extra.length ? ' — plus ' + extra.join(' and ') : ''}.`);
+              }
             }
-            if (bestCount === doors.length) break;
-          }
-          if (bestCount >= 2 && bestRoute.length > 6) {
-            this.trains.push({ route: bestRoute, prog: 0, dir: 1, pause: 8, x: bestRoute[0][0] * T + 8, y: bestRoute[0][1] * T + 8, dirx: 1, diry: 0 });
-            this.say(`🚂 All aboard! The railway line is open — a train now serves ${bestCount} station${bestCount > 2 ? 's' : 's'}.`);
-          } else if (stations.length >= 2) {
-            this.say('🛤️ Stations exist but the rails between them aren\'t connected yet.');
+          } else if (railless) {
+            this.say('🛤️ A train station has no track touching it — drag the railway right up to the station walls.');
+          } else {
+            this.say('🛤️ Each station has track, but the tracks aren\'t joined into one line yet.');
           }
         }
       }
     }
     for (const tr of this.trains) {
       if (tr.pause > 0) { tr.pause -= gm; continue; }
-      tr.prog += 4.2 * dt * tr.dir;
-      if (tr.prog >= tr.route.length - 1) { tr.prog = tr.route.length - 1; tr.dir = -1; tr.pause = 12; }
-      if (tr.prog <= 0) { tr.prog = 0; tr.dir = 1; tr.pause = 12; }
+      tr.prog += (tr.speed || 4.2) * dt * tr.dir;
+      if (tr.prog >= tr.route.length - 1) { tr.prog = tr.route.length - 1; tr.dir = -1; tr.pause = 12; tr.lastStop = tr.route.length - 1; }
+      else if (tr.prog <= 0) { tr.prog = 0; tr.dir = 1; tr.pause = 12; tr.lastStop = 0; }
+      else if (tr.stopIdx) {
+        const at = Math.round(tr.prog);
+        if (tr.stopIdx.includes(at) && at !== tr.lastStop && at !== 0 && at !== tr.route.length - 1) {
+          tr.lastStop = at; tr.pause = 6; // calling at an intermediate station
+        }
+      }
       this.followPath(tr, tr.route, tr.prog, 0);
     }
   },
@@ -362,9 +483,12 @@ const Life = {
   boats: [], ferry: null, ferrySig: '',
   tickBoats(dt) {
     if (Weather.season === 3) { this.boats = []; this.ferry = null; return; } // frozen water
-    const docks = this.activeOf('dock');
-    // rowboats pottering about near the docks
-    const cap = Math.min(4, docks.length * 2);
+    if (typeof Calamity !== 'undefined' && Calamity.droughtLevel > 0.5) { this.boats = []; this.ferry = null; return; } // no water!
+    const docks = this.activeOf('dock').concat(this.activeOf('boatclub'), this.activeOf('fishmarket'));
+    // rowboats pottering about near the waterfront — villager-owned fishing
+    // boats join the fleet
+    const owned = World.buildings.filter(b => b.boat && !b.ruined).length;
+    const cap = Math.min(9, docks.length * 2 + owned);
     if (docks.length && this.waterTiles.length > 6 && this.boats.length < cap && Math.random() < dt * 0.04) {
       const d = docks[(Math.random() * docks.length) | 0];
       let best = null, bd = 1e9;
@@ -612,7 +736,7 @@ const Life = {
     this.planeT -= dtSim * MIN_PER_SEC;
     if (this.planeT <= 0 && this.planes.length < 2) {
       this.planeT = 100 + Math.random() * 140;
-      const ry = airport.y * T + 64;
+      const ry = airport.y * T + airport.h * T - 19; // runway sits along the south apron
       const rx0 = airport.x * T + 4, rx1 = airport.x * T + airport.w * T - 4;
       if (Math.random() < 0.5) this.planes.push({ mode: 'takeoff', x: rx0, y: ry, alt: 0, v: 14, rx1 });
       else this.planes.push({ mode: 'land', x: -40, y: ry, alt: 70, v: 85, rx0, rx1, stop: rx1 - 30 });
@@ -664,7 +788,10 @@ const Life = {
     }
     for (const rw of this.roadworks) rw.t -= gm;
     this.roadworks = this.roadworks.filter(rw => rw.t > 0);
-    for (const b of World.buildings) if (b.renovating > 0) { b.renovating -= gm; if (b.renovating < 0) b.renovating = 0; }
+    for (const b of World.buildings) if (b.renovating > 0) {
+      b.renovating -= gm;
+      if (b.renovating <= 0) { b.renovating = 0; b.quakeDamage = false; } // repairs done, cracks patched
+    }
   },
 
   /* ---------------- collapse, solidarity & rebuilding ----------------
@@ -675,21 +802,22 @@ const Life = {
   startDisaster(b, cause) {
     if (this.disaster) return; // one crisis at a time
     const cx = b.x * T + b.w * 8, cy = b.y * T + b.h * 8;
+    // neighbours AND nearby shopkeepers/workers run over — a ruin in a
+    // commercial district must draw a visible crowd too
     const helpers = [];
-    for (const h of World.buildings) {
-      if (helpers.length >= 5) break;
-      if (!CAT[h.type].res || !h.residents.length || h === b) continue;
-      if (Math.abs(h.x - b.x) + Math.abs(h.y - b.y) > 24) continue;
-      const seed = (h.id * 977 + helpers.length) >>> 0;
+    for (const spot of this.crowdSpots(cx, cy, 40)) {
+      if (helpers.length >= 7) break;
       helpers.push({
-        sx: h.door.x * T + 8, sy: h.door.y * T + 8,
+        sx: spot.x, sy: spot.y,
         tx: cx + Math.cos(helpers.length * 1.3) * (b.w * 8 + 10),
         ty: cy + Math.sin(helpers.length * 1.3) * (b.h * 8 + 8),
-        f: 0, seed, kind: ['man', 'woman'][helpers.length % 2],
+        f: 0, seed: (spot.id * 977 + helpers.length) >>> 0,
+        kind: ['man', 'woman'][helpers.length % 2],
       });
     }
     this.disaster = { b, cause, phase: 'respond', t: 70, helpers };
-    this.dispatchTo(b.door.x, b.door.y); // police secure the area
+    this.disaster.unit = this.dispatchTo(b.door.x, b.door.y, this.disaster, 18); // police secure the area
+    this.coverStory(cx, cy, this.disaster, `${CAT[b.type].name} down — neighbours rush to help`);
     if (cause === 'collapse') { // fire brigade checks for survivors
       const st = World.buildings.find(s => s.type === 'fire' && s.connected && !s.construction);
       if (st) {
@@ -740,6 +868,7 @@ const Life = {
         this.say(`🧱 Community rebuild started — the ${CAT[type].name} will rise again!`);
       }
       World.refreshConnections();
+      D.over = true;
       this.disaster = null;
     }
   },
@@ -782,8 +911,59 @@ const Life = {
       Sim.safety = Math.max(20, Sim.safety - 3);
       Gov.riotCd = 6;
       this.say(`📢 Villagers are rioting outside ${hall.type === 'townhall' ? 'town hall' : 'in the street'} over ${grievance.reason} — they demand better from Mayor ${Gov.leader.name}!`);
-      this.dispatchTo(hall.door.x, hall.door.y);
+      this.dispatchTo(hall.door.x, hall.door.y, this.riot, 25);
+      this.coverStory(cx, cy, this.riot, `Protest over ${grievance.reason} outside town hall`);
     }
+  },
+
+  /* ---------------- onlookers: crowds gather at incidents ----------------
+     Anywhere something dramatic happens, people from nearby occupied
+     buildings walk over, stand in a loose ring and watch until it's over. */
+  gawkers: [],
+  /* doors of nearby occupied buildings (homes or staffed workplaces),
+     closest first — the pool that crowds and helpers are drawn from */
+  crowdSpots(cx, cy, maxTiles) {
+    const spots = [];
+    for (const h of World.buildings) {
+      if (h.ruined || h.construction) continue;
+      const occupied = (h.residents && h.residents.length) || (h.workers && h.workers.length);
+      if (!occupied) continue;
+      const d = Math.abs(h.door.x * T + 8 - cx) + Math.abs(h.door.y * T + 8 - cy);
+      if (d > maxTiles * T) continue;
+      spots.push({ x: h.door.x * T + 8, y: h.door.y * T + 8, d, id: h.id });
+    }
+    spots.sort((a, b) => a.d - b.d);
+    return spots;
+  },
+  spawnGawkers(cx, cy, n, ref) {
+    const spots = this.crowdSpots(cx, cy, 40);
+    for (let i = 0; i < n && i < spots.length; i++) {
+      const a = i * 2.4 + (cx + cy) * 0.01;
+      this.gawkers.push({
+        sx: spots[i].x, sy: spots[i].y,
+        tx: cx + Math.cos(a) * (11 + (i % 2) * 4), ty: cy + Math.sin(a) * 8 + 3,
+        f: 0, phase: 'come', stay: 14 + i * 4, age: 0, ref: ref || null, gawk: true,
+        seed: (spots[i].id * 389 + i * 31) >>> 0, kind: i % 2 ? 'woman' : 'man',
+      });
+    }
+  },
+  tickGawkers(dt) {
+    const gm = dt * MIN_PER_SEC;
+    for (const g of this.gawkers) {
+      g.age += gm;
+      if (g.phase === 'come') {
+        g.f = Math.min(1, g.f + dt * 0.3);
+        if (g.f >= 1) g.phase = 'watch';
+      } else if (g.phase === 'watch') {
+        g.stay -= gm;
+        // stay as long as the incident is live (with a hard cap), wander home after
+        const live = g.ref && !g.ref.over && g.age < 240;
+        if (g.stay <= 0 && !live) g.phase = 'leave';
+      } else {
+        g.f -= dt * 0.25;
+      }
+    }
+    this.gawkers = this.gawkers.filter(g => g.phase !== 'leave' || g.f > 0);
   },
 
   /* ---------------- disputes & crashes ---------------- */
@@ -799,16 +979,40 @@ const Life = {
     }
 
     if (this.dispute) {
-      this.dispute.t -= gm;
-      if (this.dispute.t % 2 < 0.3) for (const p of this.dispute.ppl) { p.bubble = Math.random() < 0.5 ? '💢' : '😠'; p.bubbleUntil = performance.now() + 1500; }
-      if (this.dispute.t <= 0) {
-        for (const p of this.dispute.ppl) { p.freezeT = 0; p.bubble = '🤝'; p.bubbleUntil = performance.now() + 2000; }
+      const d0 = this.dispute;
+      // if a squad car is on the way the quarrel keeps simmering until it
+      // pulls up (capped, in case the car can never make it there)
+      if (d0.unit && !d0.unit.done && !d0.arrived && (d0.stall = (d0.stall || 0) + gm) < 120) {
+        if (d0.t < 3) d0.t = 3;
+        for (const p of d0.ppl) p.freezeT = Math.max(p.freezeT || 0, 4);
+      }
+      if (d0.arrived && !d0.calmed) {
+        d0.calmed = true;
+        d0.t = Math.min(d0.t, 4);
+        for (const p of d0.ppl) { p.bubble = '🚔'; p.bubbleUntil = performance.now() + 1800; }
+        this.say('🚔 An officer talked the quarrellers down');
+      }
+      d0.t -= gm;
+      if (!d0.calmed && d0.t % 2 < 0.3) for (const p of d0.ppl) { p.bubble = Math.random() < 0.5 ? '💢' : '😠'; p.bubbleUntil = performance.now() + 1500; }
+      if (d0.t <= 0) {
+        for (const p of d0.ppl) { p.freezeT = 0; p.bubble = '🤝'; p.bubbleUntil = performance.now() + 2000; }
+        d0.over = true;
         this.dispute = null;
       }
     }
     if (this.crash) {
-      this.crash.t -= gm;
-      if (this.crash.t <= 0) { this.say('🛻 Tow truck cleared the crash site'); this.crash = null; }
+      const c = this.crash;
+      // the wreck stays on the road until the squad car actually arrives
+      if (c.unit && !c.unit.done && !c.arrived && (c.stall = (c.stall || 0) + gm) < 180) {
+        if (c.t < 5) c.t = 5;
+      }
+      if (c.arrived && !c.secured) {
+        c.secured = true;
+        c.t = Math.min(c.t, 10);
+        this.say('🚔 Police reached the crash — statements taken, tow truck called');
+      }
+      c.t -= gm;
+      if (c.t <= 0) { c.over = true; this.say('🛻 Tow truck cleared the crash site'); this.crash = null; }
     }
     if (this.incidentCd > 0 || Sim.clock < 420 || Sim.clock > 1320) return;
 
@@ -820,9 +1024,9 @@ const Life = {
         if (Math.abs(a.x - b.x) + Math.abs(a.y - b.y) < 16) {
           a.freezeT = b.freezeT = 9;
           this.dispute = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, t: 9, ppl: [a, b] };
-          const hasPolice = World.buildings.some(s => s.type === 'police' && s.connected);
-          this.say(hasPolice ? '😠 Public dispute in the street — police en route!' : '😠 A loud argument breaks out in the street');
-          if (hasPolice) this.dispatchTo(Math.round(a.x / T), Math.round(a.y / T));
+          this.dispute.unit = this.dispatchTo(Math.round(a.x / T), Math.round(a.y / T), this.dispute, 8);
+          this.say(this.dispute.unit ? '😠 Public dispute in the street — police en route!' : '😠 A loud argument breaks out in the street');
+          this.spawnGawkers(this.dispute.x, this.dispute.y, 3, this.dispute);
           this.incidentCd = 300;
           break;
         }
@@ -835,7 +1039,7 @@ const Life = {
         const a = cars[i], b = cars[j];
         if (Math.abs(a.x - b.x) + Math.abs(a.y - b.y) < 20) {
           this.crash = {
-            x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, t: 28,
+            x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, t: 30, t0: 30,
             s1: a.trip.car.seed, s2: b.trip.car.seed,
             a1: (Math.random() - 0.5) * 1.1, a2: (Math.random() - 0.5) * 1.1 + 1.5,
           };
@@ -843,9 +1047,11 @@ const Life = {
             if (p.trip.car) p.trip.car.free = true;
             p.state = 'in'; p.at = p.home; p.trip = null; p.dest = null; p.returnAt = undefined; p.backTo = null;
           }
-          this.say('💥 Car crash! Police are on the way');
           if (typeof Snd !== 'undefined') Snd.crunch();
-          this.dispatchTo(Math.round(this.crash.x / T), Math.round(this.crash.y / T));
+          this.crash.unit = this.dispatchTo(Math.round(this.crash.x / T), Math.round(this.crash.y / T), this.crash, 12);
+          this.say(this.crash.unit ? '💥 Car crash! Police are on the way' : '💥 Car crash! No squad car can respond — the drivers sort it out themselves');
+          this.spawnGawkers(this.crash.x, this.crash.y, 5, this.crash);
+          this.coverStory(this.crash.x, this.crash.y, this.crash, 'Two-car collision snarls traffic');
           Sim.safety = Math.max(20, Sim.safety - 2);
           this.incidentCd = 400;
           break;
@@ -853,17 +1059,23 @@ const Life = {
       }
     }
   },
-  dispatchTo(tx, ty) {
-    const stations = World.buildings.filter(s => s.type === 'police' && s.connected && !s.construction);
+  /* send the nearest squad car to a tile; `scene` (optional) is the incident
+     object — it gets .arrived stamped when the car pulls up, and the car then
+     holds the scene for `wait` game-minutes before heading back */
+  dispatchTo(tx, ty, scene, wait) {
+    const spot = World.nearestRoad(tx, ty, 4);
+    if (!spot) return null;
+    const stations = World.buildings.filter(s => s.type === 'police' && s.connected && !s.construction && !s.ruined);
+    let best = null, bp = null;
     for (const s of stations) {
-      const path = World.roadPath(s.door.x, s.door.y, tx, ty) ||
-                   World.roadPath(s.door.x, s.door.y, tx + 1, ty) || World.roadPath(s.door.x, s.door.y, tx, ty + 1);
-      if (path) {
-        this.police.push({ path, prog: 0, x: s.door.x * T + 8, y: s.door.y * T + 8, dirx: 1, diry: 0, phase: 'go', station: s, patrol: true });
-        if (typeof Snd !== 'undefined') Snd.siren();
-        return;
-      }
+      const path = World.roadPath(s.door.x, s.door.y, spot.x, spot.y);
+      if (path && (!bp || path.length < bp.length)) { best = s; bp = path; }
     }
+    if (!best) return null;
+    const u = { path: bp, prog: 0, x: best.door.x * T + 8, y: best.door.y * T + 8, dirx: 1, diry: 0, phase: 'go', station: best, patrol: true, scene: scene || null, wait: wait || 10 };
+    this.police.push(u);
+    if (typeof Snd !== 'undefined') Snd.siren();
+    return u;
   },
 
   /* ---------------- sky events: balloons, UFO ---------------- */
@@ -972,11 +1184,26 @@ const Life = {
       return always.concat(World.buildings.filter(b => (b.type === 'stadium' || b.type === 'park') && b.connected));
     return always;
   },
+  /* on festival nights the WHOLE town becomes a launch pad */
+  festiveLaunchSites() {
+    if (this._festDay !== Sim.day || !this._festSites) {
+      this._festDay = Sim.day;
+      const all = World.buildings.filter(b => !b.ruined && !b.construction && b.connected);
+      const picks = [];
+      for (let i = 0; i < 14 && all.length; i++) picks.push(all[(Math.random() * all.length) | 0]);
+      this._festSites = picks;
+    }
+    return this._festSites;
+  },
   tickFireworks(dt) {
-    const show = Sim.clock >= 21 * 60 && Sim.clock <= 22.5 * 60;
-    if (show && this.rockets.length + this.sparks.length < 120) {
-      for (const v of this.fireworkVenues()) {
-        if (Math.random() < dt * 0.5) {
+    const festive = typeof Festivals !== 'undefined' && Festivals.fireworksNight();
+    const show = (Sim.clock >= 21 * 60 && Sim.clock <= 22.5 * 60) ||
+                 (festive && (Sim.clock >= 19.5 * 60 || Sim.clock < 40));
+    const cap = festive ? 420 : 120; // festival skies are LOUD
+    if (show && this.rockets.length + this.sparks.length < cap) {
+      const sites = festive ? this.fireworkVenues().concat(this.festiveLaunchSites()) : this.fireworkVenues();
+      for (const v of sites) {
+        if (Math.random() < dt * (festive ? 0.4 : 0.5)) {
           this.rockets.push({
             x: v.x * T + Math.random() * v.w * T, y: v.y * T,
             vy: -(46 + Math.random() * 22), t: 0.9 + Math.random() * 0.5,
@@ -1104,6 +1331,11 @@ const Life = {
 
     // police movement
     for (const u of this.police) {
+      if (u.phase === 'scene') { // parked at the incident, lights flashing
+        u.wait -= gm;
+        if (u.wait <= 0) { u.phase = 'return'; u.path = [...u.path].reverse(); u.prog = 0; }
+        continue;
+      }
       u.prog += 3.2 * dtSim;
       this.followPath(u, u.path, u.prog, 3.5);
       if (u.prog >= u.path.length - 1) {
@@ -1116,6 +1348,12 @@ const Life = {
             if (Math.random() < (court ? 0.95 : 0.8)) { this.resolve(true, u); }
             else { this.say('💨 The burglar slipped away in the chaos!'); this.resolve(false, null, true); }
           } else if (cc) { /* too late — burglar still fleeing; wait it out */ }
+          if (u.scene) u.scene.arrived = true;
+          if (u.patrol) { // hold the scene instead of an instant U-turn
+            u.phase = 'scene';
+            if (u.wait === undefined) u.wait = 6;
+            continue;
+          }
           u.phase = 'return';
           u.path = [...u.path].reverse(); u.prog = 0;
         } else u.done = true;

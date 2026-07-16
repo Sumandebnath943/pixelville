@@ -40,11 +40,16 @@ function rebuildGround() {
   const treePx = [];
   const h2 = (x, y) => (((x * 374761393 + y * 668265263) ^ ((x * 374761393 + y * 668265263) >>> 13)) >>> 0);
 
+  const drought = typeof Calamity !== 'undefined' && Calamity.droughtLevel >= 0.5;
+  const sandSpots = [];
+
   /* pass 1 — base terrain + procedural ground props */
   for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
     const i = World.idx(x, y), gr = World.ground[i];
     if (gr === G_WATER) {
-      if (winter) {
+      if (drought && !winter) {
+        g.drawImage(SPR.dryBed, x * T, y * T); // the drought drank the river
+      } else if (winter) {
         g.drawImage(SPR.iceTile, x * T, y * T);
       } else {
         g.drawImage(SPR.waterFrames[0], x * T, y * T);
@@ -56,6 +61,11 @@ function rebuildGround() {
         if (land(x - 1, y)) g.fillRect(x * T, y * T, 1, T);
         if (land(x + 1, y)) g.fillRect(x * T + T - 1, y * T, 1, T);
       }
+    } else if (gr === G_SAND) {
+      const hh = h2(x, y);
+      g.drawImage(SPR.sandTiles[hh % 4], x * T, y * T);
+      if (winter) { g.fillStyle = 'rgba(238,243,248,0.45)'; g.fillRect(x * T, y * T, T, T); }
+      else if (!World.roadMap[i] && !World.bmap[i] && !World.railMap[i]) sandSpots.push([x, y]);
     } else if (gr === G_ROCK) {
       g.drawImage(SPR.rockTile, x * T, y * T);
       if (winter) { g.fillStyle = 'rgba(238,243,248,0.35)'; g.fillRect(x * T, y * T, T, T); }
@@ -134,20 +144,27 @@ function rebuildGround() {
     if ((x * 7 + y * 13) % 7 === 0 && gr !== G_WATER) UI.lampSpots.push([x, y]);
   }
 
-  /* pass 3.5 — railway tracks (ballast on grass, bare rails over level crossings) */
+  /* pass 3.5 — railway tracks: ballast on grass, bare rails over level
+     crossings, wooden trestle bridges across open water */
   for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
     const i = World.idx(x, y);
     if (!World.railMap[i]) continue;
     const m = World.railMask(x, y);
-    g.drawImage(World.roadMap[i] ? SPR.railsBare[m] : SPR.rails[m], x * T, y * T);
-    if (World.roadMap[i]) { // level-crossing warning posts
-      g.fillStyle = '#e8e4cf'; g.fillRect(x * T + 1, y * T + 1, 1, 3); g.fillRect(x * T + T - 2, y * T + T - 4, 1, 3);
-      g.fillStyle = '#c65f4e'; g.fillRect(x * T + 1, y * T + 1, 1, 1); g.fillRect(x * T + T - 2, y * T + T - 4, 1, 1);
+    if (World.ground[i] === G_WATER && !World.roadMap[i]) {
+      g.drawImage(SPR.railTrestle, x * T, y * T);
+      g.drawImage(SPR.railsBare[m], x * T, y * T);
+    } else {
+      g.drawImage(World.roadMap[i] ? SPR.railsBare[m] : SPR.rails[m], x * T, y * T);
+      if (World.roadMap[i]) { // level-crossing warning posts
+        g.fillStyle = '#e8e4cf'; g.fillRect(x * T + 1, y * T + 1, 1, 3); g.fillRect(x * T + T - 2, y * T + T - 4, 1, 3);
+        g.fillStyle = '#c65f4e'; g.fillRect(x * T + 1, y * T + 1, 1, 1); g.fillRect(x * T + T - 2, y * T + T - 4, 1, 1);
+      }
     }
   }
 
   // share terrain info with the ambient-life module
   Life.waterTiles = UI.waterTiles;
+  Life.sandTiles = sandSpots;
   Life.edgeRoads = [];
   for (let x = 0; x < GW; x++) for (const y of [0, 1, GH - 2, GH - 1])
     if (World.isRoad(x, y)) Life.edgeRoads.push([x, y]);
@@ -191,12 +208,52 @@ function duskTint() {
   return 0;
 }
 
+/* how lit a building is right now (0..1): shops go dark after closing,
+   homes wind down for the night with only the odd porch light, and
+   24-hour services never sleep. Street lamps are handled separately.
+   Festival nights override the rules: Christmas month keeps every
+   building aglow, and on Diwali every window burns bright. */
+function buildingLit(b) {
+  let lf = buildingLitBase(b);
+  if (typeof Festivals !== 'undefined' && !b.construction && !b.ruined) {
+    if (Festivals.decorated() && (Sim.clock >= 990 || Sim.clock < 330)) lf = Math.max(lf, 0.55);
+    if (Festivals.diyasTonight() && (Sim.clock >= 1050 || Sim.clock < 270)) lf = Math.max(lf, 0.95);
+  }
+  return lf;
+}
+function buildingLitBase(b) {
+  const d = CAT[b.type];
+  if (b.construction > 0 || b.ruined) return 0;
+  const c = Sim.clock;
+  if (d.res) {
+    if (!b.residents.length) return 0;
+    if (c >= 1410 || c < 300) return (b.id % 4 === 0) ? 0.3 : 0; // deep night: nearly all asleep
+    if (c >= 1350) return (b.id % 2 === 0) ? 0.55 : 0.12;        // 22:30–23:30, winding down
+    if (c >= 1020 || c < 420) return 1;                          // evenings & early risers
+    return 0.3;
+  }
+  if (d.hours && d.hours.s === 0 && d.hours.e === 1440) return 1; // 24h services
+  if (d.hours) {
+    const open = c >= d.hours.s - 45 && c <= d.hours.e + 45;
+    return open ? 1 : (b.id % 6 === 0 ? 0.18 : 0); // the odd security light
+  }
+  return 0.35;
+}
+
 /* =============== render =============== */
 let lastFrameT = 0;
 function render(now) {
   const dtReal = Math.min(0.08, (now - lastFrameT) / 1000 || 0.016);
   lastFrameT = now;
   const z = UI.zoom;
+  // earthquake camera shake: jolt the camera, restore it at the end of the frame
+  let shakeRX = 0, shakeRY = 0;
+  if (typeof Calamity !== 'undefined' && Calamity.shakeT > 0) {
+    const amp = Math.min(1, Calamity.shakeT) * 3.5;
+    shakeRX = (Math.random() - 0.5) * amp * 2;
+    shakeRY = (Math.random() - 0.5) * amp * 2;
+    UI.camX += shakeRX; UI.camY += shakeRY;
+  }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = Weather.season === 3 ? '#1c2734' : '#22402c';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -212,6 +269,24 @@ function render(now) {
   UI.lights = [];
 
   Weather.renderPuddles(ctx, vx0, vy0, vx1, vy1);
+
+  // flood water over the streets
+  if (typeof Calamity !== 'undefined' && Calamity.flooded.size) {
+    ctx.fillStyle = 'rgba(72,130,190,0.55)';
+    for (const fi of Calamity.flooded) {
+      const fx = fi % GW, fy = (fi / GW) | 0;
+      if (fx < vx0 || fx > vx1 || fy < vy0 || fy > vy1) continue;
+      ctx.fillRect(fx * T, fy * T, T, T);
+    }
+    if (Math.floor(now / 600) % 2) { // glints on the moving water
+      ctx.fillStyle = 'rgba(190,225,250,0.45)';
+      for (const fi of Calamity.flooded) {
+        const fx = fi % GW, fy = (fi / GW) | 0;
+        if (fx < vx0 || fx > vx1 || fy < vy0 || fy > vy1) continue;
+        if ((fx * 7 + fy * 13) % 5 === 0) ctx.fillRect(fx * T + 3, fy * T + 5, 4, 1);
+      }
+    }
+  }
 
   // water shimmer (not on ice)
   if (Weather.season !== 3 && Math.floor(now / 550) % 2 === 1) {
@@ -254,16 +329,29 @@ function render(now) {
     const f = Math.min(1, h.f), hx = h.sx + (h.tx - h.sx) * f, hy = h.sy + (h.ty - h.sy) * f;
     ents.push({ kind: 'runner', h, x: hx, y: hy, base: hy + 4, bucket: bk.b });
   }
+  for (const g of Life.gawkers) {
+    const f = Math.min(1, Math.max(0, g.f)), gx = g.sx + (g.tx - g.sx) * f, gy = g.sy + (g.ty - g.sy) * f;
+    ents.push({ kind: 'runner', h: g, x: gx, y: gy, base: gy + 4 });
+  }
   for (const tr of Life.tourists) if (tr.phase !== 'visit') ents.push({ kind: 'tourist', tr, base: tr.y + 4 });
   for (const dk of Life.ducks) ents.push({ kind: 'duck', dk, base: dk.y + 3 });
   // public transport & harbour life
   for (const bus of Life.buses) ents.push({ kind: 'bus', u: bus, base: bus.y + 4 });
   for (const train of Life.trains) {
-    ents.push({ kind: 'traincar', u: train, off: 0, engine: true, base: train.y + 4 });
-    ents.push({ kind: 'traincar', u: train, off: 1.4, base: train.y + 4.01 });
-    ents.push({ kind: 'traincar', u: train, off: 2.8, base: train.y + 4.02 });
+    const nCars = train.cars || 3;
+    for (let ci = 0; ci < nCars; ci++)
+      ents.push({ kind: 'traincar', u: train, off: ci * 1.4, engine: ci === 0, base: train.y + 4 + ci * 0.01 });
   }
   for (const bt of Life.boats) ents.push({ kind: 'boat', u: bt, base: bt.y + 3 });
+  if (typeof Calamity !== 'undefined') for (const rf of Calamity.rafts) ents.push({ kind: 'raft', u: rf, base: rf.y + 3 });
+  for (const rp of Life.reporters) {
+    const rf2 = Math.min(1, Math.max(0, rp.f));
+    const rx = rp.sx + (rp.tx - rp.sx) * rf2, ry2 = rp.sy + (rp.ty - rp.sy) * rf2;
+    ents.push({ kind: 'reporter', rp, x: rx, y: ry2, base: ry2 + 4 });
+  }
+  for (const bf of Life.beachfolk) ents.push({ kind: 'beach', bf, base: bf.y + 4 });
+  if (typeof Festivals !== 'undefined' && Festivals.tree)
+    ents.push({ kind: 'xmastree', ft: Festivals.tree, base: (Festivals.tree.y + 2) * T });
   if (Life.ferry) ents.push({ kind: 'ferry', u: Life.ferry, base: Life.ferry.y + 5 });
   for (const cc of Life.campaignCars) ents.push({ kind: 'campcar', u: cc, base: cc.y + 4 });
   // campaign camps: tents with volunteers, one per candidate
@@ -324,6 +412,52 @@ function render(now) {
       ctx.globalAlpha = 1;
       ctx.drawImage(s.img, b.x * T, b.y * T - s.oy);
       if (Weather.season === 3) ctx.drawImage(s.snow, b.x * T, b.y * T - s.oy);
+      // earthquake / storm damage: visible cracks until repairs finish
+      if (b.quakeDamage) {
+        ctx.strokeStyle = 'rgba(30,26,22,0.65)'; ctx.lineWidth = 1 / z;
+        const bx0 = b.x * T, by0 = b.y * T - s.oy;
+        ctx.beginPath();
+        ctx.moveTo(bx0 + 3, by0 + 4); ctx.lineTo(bx0 + 6, by0 + 9); ctx.lineTo(bx0 + 4, by0 + 14);
+        ctx.moveTo(bx0 + b.w * T - 4, by0 + 6); ctx.lineTo(bx0 + b.w * T - 8, by0 + 12); ctx.lineTo(bx0 + b.w * T - 5, by0 + 18);
+        ctx.stroke();
+      }
+      // flood: the ground floor sits in the water
+      if (b.flooded) {
+        ctx.fillStyle = 'rgba(72,130,190,0.55)';
+        ctx.fillRect(b.x * T - 2, (b.y + b.h) * T - 7, b.w * T + 4, 8);
+        ctx.fillStyle = 'rgba(190,225,250,0.5)';
+        ctx.fillRect(b.x * T - 2 + (Math.floor(now / 500) % 2) * 5, (b.y + b.h) * T - 7, 4, 1);
+      }
+      // festival dress: Christmas light-strings & wreaths for a whole month
+      if (typeof Festivals !== 'undefined' && Festivals.decorated()) {
+        const fcols = ['#ff6060', '#ffd160', '#60c0ff', '#80ff90', '#ff90e0'];
+        const ry2 = b.y * T - s.oy + 2;
+        for (let lx = b.x * T + 2; lx < b.x * T + b.w * T - 1; lx += 3) {
+          ctx.fillStyle = fcols[((lx >> 2) + Math.floor(now / 500)) % fcols.length];
+          ctx.fillRect(lx, ry2 + ((lx >> 1) % 2), 1, 1);
+        }
+        if (CAT[b.type].res) { // wreath on the door
+          ctx.fillStyle = '#2e6b38'; ctx.fillRect(b.door.x * T + 6, (b.y + b.h) * T - 8, 3, 3);
+          ctx.fillStyle = '#c0392b'; ctx.fillRect(b.door.x * T + 7, (b.y + b.h) * T - 6, 1, 1);
+        }
+      }
+      // Diwali: rows of little diyas flicker along every building's base
+      if (typeof Festivals !== 'undefined' && Festivals.diyasTonight() && dark > 0.2) {
+        for (let lx = b.x * T + 2; lx < b.x * T + b.w * T - 2; lx += 4) {
+          ctx.fillStyle = '#ffb050'; ctx.fillRect(lx, (b.y + b.h) * T - 2, 1, 1);
+          ctx.fillStyle = (lx + Math.floor(now / 260)) % 3 ? '#ffd870' : '#ff9040';
+          ctx.fillRect(lx, (b.y + b.h) * T - 3, 1, 1);
+        }
+        UI.lights.push({ x: b.x * T + b.w * 8, y: (b.y + b.h) * T - 2, r: b.w * 10, a: 0.5, tint: 'orange' });
+      }
+      // Easter: painted eggs on the doorstep
+      if (typeof Festivals !== 'undefined' && Festivals.isEaster() && CAT[b.type].res) {
+        const ecols = ['#f2b8cc', '#8fd0f4', '#f2d94f'];
+        for (let k = 0; k < 3; k++) {
+          ctx.fillStyle = ecols[(b.id + k) % 3];
+          ctx.fillRect(b.door.x * T + 2 + k * 3, (b.y + b.h) * T + 2, 2, 2);
+        }
+      }
       // the mayor's flag flies over an occupied town hall
       if (b.type === 'townhall' && typeof Gov !== 'undefined' && Gov.leader) {
         const fx = b.x * T + 4, fy = b.y * T - s.oy - 8;
@@ -340,6 +474,19 @@ function render(now) {
         ctx.fillRect(b.x * T + 1, b.y * T + 2, b.w * T - 2, 1);
         const pw = SPR.person('hiker', b.id * 5);
         ctx.drawImage(pw.f[Math.floor(now / 300) % 2], b.x * T + b.w * T - 8, b.y * T - s.oy + 6);
+      }
+      // adding a floor: the new storey rises in plain sight — timber studs
+      // first, walls filling in from the bottom, then the first window
+      if (b.upgrading > 0 && b.type === 'house') {
+        const done = 1 - Math.min(1, b.upgrading / (b.level === 1 ? 240 : 300));
+        const fh = 11, topY = b.y * T - s.oy - fh;
+        ctx.fillStyle = '#a5824f';
+        for (let sx2 = b.x * T + 2; sx2 < b.x * T + b.w * T - 1; sx2 += 5) ctx.fillRect(sx2, topY, 1, fh);
+        ctx.fillRect(b.x * T + 1, topY, b.w * T - 2, 1); // top plate
+        ctx.fillStyle = 'rgba(230,214,180,0.85)';
+        ctx.fillRect(b.x * T + 1, topY + fh * (1 - done), b.w * T - 2, fh * done);
+        if (done > 0.55) { ctx.fillStyle = '#5f83a4'; ctx.fillRect(b.x * T + 4, topY + 3, 3, 4); }
+        if (done > 0.8) { ctx.fillStyle = '#5f83a4'; ctx.fillRect(b.x * T + b.w * T - 8, topY + 3, 3, 4); }
       }
       // fire!
       if (b.fire) {
@@ -385,6 +532,36 @@ function render(now) {
           ctx.drawImage(SPR.car((b.id + k * 3) % 8).v, px, py);
         }
       }
+      // tea-stall regulars: a glass of chai, a smoke, the day's gossip
+      if (b.type === 'teastall' && Sim.clock > 300 && Sim.clock < 1410) {
+        const n = 2 + (b.id + Math.floor(now / 45000)) % 2;
+        for (let k = 0; k < n; k++) {
+          const hh = (b.id * 41 + k * 23) >>> 0;
+          const ps = SPR.person(['man', 'woman', 'man'][k % 3], hh);
+          const px2 = b.x * T - 7 + k * 9, py2 = (b.y + b.h) * T + 3 - (k % 2);
+          ctx.drawImage(ps.f[Math.floor(now / 800 + k) % 2], px2, py2 - ps.h);
+          if ((Math.floor(now / 1400) + k) % 3 === 0) {
+            ctx.font = '6px "Segoe UI Emoji", serif';
+            ctx.fillText(k % 3 === 1 ? '🚬' : '☕', px2 + 4, py2 - ps.h - 1);
+          }
+          if (k % 3 === 1 && Math.random() < 0.02) UI.smoke.push({ x: px2 + 5, y: py2 - ps.h - 2, r: 0.8, life: 0.5 });
+        }
+      }
+      // smoke break: workers step outside the big workplaces mid-morning & mid-afternoon
+      const onBreak = (Sim.clock >= 630 && Sim.clock < 665) || (Sim.clock >= 950 && Sim.clock < 985);
+      if (onBreak && (bd.jobs || 0) >= 6 && b.workers.length >= 2 && !bd.res) {
+        for (let k = 0; k < 2; k++) {
+          const hh = (b.id * 77 + k * 31) >>> 0;
+          const ps = SPR.person(k ? 'woman' : 'man', hh);
+          const px2 = b.door.x * T - 11 - k * 7, py2 = (b.y + b.h) * T - 1;
+          ctx.drawImage(ps.f[0], px2, py2 - ps.h);
+          if (k === 0 && Math.floor(now / 900) % 2) {
+            ctx.font = '6px "Segoe UI Emoji", serif';
+            ctx.fillText('🚬', px2 + 4, py2 - ps.h - 1);
+          }
+          if (k === 0 && Math.random() < 0.03) UI.smoke.push({ x: px2 + 5, y: py2 - ps.h - 3, r: 0.8, life: 0.5 });
+        }
+      }
       // queue outside busy indoor venues
       if (bd.visit && !bd.noroof && b.inside > 2) {
         const qn = Math.min(5, b.inside - 2);
@@ -405,10 +582,15 @@ function render(now) {
           ctx.drawImage(vs.f[(vf + k) % 2], b.x * T + 4 + (hh % (b.w * T - 10)), b.y * T + 4 + ((hh >> 4) % (b.h * T - 12)));
         }
       }
-      // building light sources
+      // building light sources — gated by what's actually awake in there
       if (dark > 0.1) {
-        UI.lights.push({ x: b.x * T + b.w * 8, y: b.y * T + b.h * 8, r: b.w * 11 + 8, a: 0.5, tint: 'warm' });
-        if (b.type === 'amusement') {
+        const lf = buildingLit(b);
+        if (lf >= 0.25)
+          UI.lights.push({ x: b.x * T + b.w * 8, y: b.y * T + b.h * 8, r: (b.w * 11 + 8) * Math.max(0.55, lf), a: 0.5 * lf, tint: 'warm' });
+        // porch lights: many homes leave one small lamp burning by the door
+        if (bd.res && b.residents.length && lf < 1 && b.id % 3 !== 2)
+          UI.lights.push({ x: b.door.x * T + 8, y: b.door.y * T - 3, r: 9, a: 0.55, tint: 'warm' });
+        if ((b.type === 'amusement' || b.type === 'casino') && lf > 0.5) {
           const tints = ['pink', 'blue', 'green', 'orange'];
           UI.lights.push({
             x: b.x * T + 22, y: b.y * T + 6, r: 34 + Math.sin(now / 300) * 6,
@@ -428,6 +610,11 @@ function render(now) {
           UI.lights.push({ x: hx, y: hy, r: 15, a: 0.85, tint: 'cool' });
           UI.lights.push({ x: p.x, y: p.y, r: 8, a: 0.5, tint: 'cool' });
         }
+      } else if (p.trip.moto) {
+        shadow(p.x, p.y + 2.5, 5, 1.6);
+        if (p.dirx !== 0) ctx.drawImage(SPR.moto.h, Math.round(p.x) - 5, Math.round(p.y) - 4);
+        else ctx.drawImage(SPR.moto.v, Math.round(p.x) - 3, Math.round(p.y) - 5);
+        if (dark > 0.1) UI.lights.push({ x: p.x + (p.dirx || 0) * 9, y: p.y + (p.diry || 0) * 9, r: 11, a: 0.7, tint: 'cool' });
       } else {
         const spr = SPR.person(p.kind, p.seed);
         shadow(p.x, p.y + 1.5, 3, 1.2);
@@ -481,6 +668,10 @@ function render(now) {
       const spr = SPR.person(e.h.kind, e.h.seed);
       shadow(e.x, e.y + 1.5, 3, 1.2);
       ctx.drawImage(spr.f[e.h.f < 1 ? frame : Math.floor(now / 420) % 2], Math.round(e.x) - 3, Math.round(e.y) - spr.h + 1);
+      if (e.h.gawk && e.h.f >= 1 && (Math.floor(now / 1200) + e.h.seed) % 3 === 0) { // murmuring onlookers
+        ctx.font = '7px "Segoe UI Emoji", serif';
+        ctx.fillText('😮', Math.round(e.x) - 3, Math.round(e.y) - spr.h - 4);
+      }
       if (e.bucket) {
         ctx.fillStyle = '#8fa6b8'; ctx.fillRect(Math.round(e.x) + 3, Math.round(e.y) - 3, 2, 2); // bucket in hand
         if (e.h.f >= 1) { // tossed water flying toward the fire
@@ -529,13 +720,132 @@ function render(now) {
       const tr = e.u;
       const o = { x: tr.x, y: tr.y, dirx: tr.dirx, diry: tr.diry };
       if (e.off) Life.followPath(o, tr.route, Math.max(0, Math.min(tr.route.length - 1, tr.prog - e.off * tr.dir)), 0);
-      const spr = e.engine ? SPR.trainEngine : SPR.trainCoach;
+      // each service holds its own track of the three-track mainline
+      if (tr.lane) { if (o.dirx !== 0) o.y += tr.lane; else o.x += tr.lane; }
+      const spr = e.engine
+        ? (tr.type === 'express' ? SPR.trainExpress : tr.type === 'freight' ? SPR.freightEngine : SPR.trainEngine)
+        : (tr.type === 'express' ? SPR.expressCoach : tr.type === 'freight' ? SPR.freightCar : SPR.trainCoach);
       shadow(o.x, o.y + 3, 9, 2.4);
       if (o.dirx !== 0) ctx.drawImage(spr.h, Math.round(o.x) - 9, Math.round(o.y) - 4);
       else ctx.drawImage(spr.v, Math.round(o.x) - 4, Math.round(o.y) - 9);
       if (e.engine && dark > 0.1) UI.lights.push({ x: o.x + (o.dirx || 0) * 14, y: o.y + (o.diry || 0) * 14, r: 20, a: 0.9, tint: 'warm' });
-      if (e.engine && Math.random() < 0.12 && UI.speeds[UI.speedIdx] > 0)
+      if (e.engine && tr.type !== 'express' && Math.random() < 0.12 && UI.speeds[UI.speedIdx] > 0)
         UI.smoke.push({ x: o.x, y: o.y - 7, r: 1.4 + Math.random(), life: 0.7 });
+    } else if (e.kind === 'raft') {
+      const u = e.u;
+      ctx.strokeStyle = 'rgba(220,240,252,0.35)';
+      ctx.beginPath(); ctx.ellipse(u.x, u.y + 2, 7, 2.4, 0, 0, 7); ctx.stroke();
+      ctx.save();
+      if (u.flip < 0) { ctx.translate(u.x * 2, 0); ctx.scale(-1, 1); }
+      ctx.drawImage(SPR.raft, Math.round(u.x) - 6, Math.round(u.y) - 4);
+      ctx.restore();
+    } else if (e.kind === 'reporter') {
+      const spr = SPR.person('reporter', e.rp.seed);
+      shadow(e.x, e.y + 1.5, 3, 1.2);
+      ctx.drawImage(spr.f[e.rp.phase === 'report' ? Math.floor(now / 500) % 2 : frame], Math.round(e.x) - 3, Math.round(e.y) - spr.h + 1);
+      if (e.rp.phase === 'report') {
+        ctx.font = '7px "Segoe UI Emoji", serif';
+        if (Math.floor(now / 900) % 2) ctx.fillText('🎤', Math.round(e.x) + 3, Math.round(e.y) - spr.h - 2);
+        if (dark > 0.2) UI.lights.push({ x: e.x, y: e.y - 6, r: 12, a: 0.8, tint: 'cool' }); // camera light
+      }
+    } else if (e.kind === 'beach') {
+      const bf = e.bf;
+      if (bf.umbrella) ctx.drawImage(SPR.umbrellas[bf.seed % 4], Math.round(bf.x) - 9, Math.round(bf.y) - 10);
+      if (bf.mode === 'towel') {
+        ctx.fillStyle = bf.towelC;
+        ctx.fillRect(Math.round(bf.x) - 4, Math.round(bf.y) - 2, 9, 5);
+        const spr = SPR.person(bf.kind, bf.seed);
+        ctx.save();
+        ctx.translate(Math.round(bf.x) + 2, Math.round(bf.y) - 1);
+        ctx.rotate(Math.PI / 2);
+        ctx.drawImage(spr.f[0], -3, -4); // sunbathing
+        ctx.restore();
+      } else {
+        const spr = SPR.person(bf.kind, bf.seed);
+        const bob = bf.mode === 'wade' ? Math.round(Math.sin(bf.ph * 2)) : 0;
+        shadow(bf.x, bf.y + 1.5, 3, 1.2);
+        ctx.drawImage(spr.f[Math.floor(now / 600 + bf.seed) % 2], Math.round(bf.x) - 3, Math.round(bf.y) - spr.h + 1 + bob);
+      }
+    } else if (e.kind === 'xmastree') {
+      const ft = e.ft;
+      const cx = ft.x * T + 16, baseY = (ft.y + 2) * T - 2;
+      if (ft.phase === 'scouting') {
+        // the committee out in the woods, sizing up the giant
+        if (ft.src) {
+          const sx = ft.src.x * T + 8, sy = ft.src.y * T + 12;
+          for (let k = 0; k < 3; k++) {
+            const ps = SPR.person(['man', 'woman', 'hiker'][k], 31 + k * 7);
+            ctx.drawImage(ps.f[(Math.floor(now / 700) + k) % 2], sx - 10 + k * 8, sy - ps.h);
+          }
+          if (Math.floor(now / 1100) % 2) { ctx.font = '7px "Segoe UI Emoji", serif'; ctx.fillText('🔍', sx + 2, sy - 12); }
+        }
+      } else if (ft.phase === 'hauling' && ft.haulPath) {
+        // the great haul: a truck drags the tree through the streets
+        const o = { x: 0, y: 0, dirx: 1, diry: 0 };
+        Life.followPath(o, ft.haulPath, Math.min(ft.haulPath.length - 1, ft.prog), 3.5);
+        shadow(o.x, o.y + 3, 11, 2.6);
+        ctx.drawImage(SPR.car(6).h, Math.round(o.x) - 12, Math.round(o.y) - 4);
+        ctx.fillStyle = '#5d4630'; ctx.fillRect(Math.round(o.x) - 1, Math.round(o.y) - 1, 16, 3); // trailer
+        ctx.fillStyle = '#2e6b38'; // the tree, lying down
+        ctx.beginPath(); ctx.moveTo(o.x + 15, o.y); ctx.lineTo(o.x + 1, o.y - 4); ctx.lineTo(o.x + 1, o.y + 4); ctx.fill();
+        if ((Math.floor(now / 1200)) % 3 === 0) { ctx.font = '7px "Segoe UI Emoji", serif'; ctx.fillText('🎄', Math.round(o.x) - 4, Math.round(o.y) - 8); }
+      } else if (ft.phase === 'raising' || ft.phase === 'lit') {
+        const TH = 42, TW = 26;
+        const th = ft.phase === 'lit' ? TH : Math.max(8, TH * ft.prog);
+        shadow(cx, baseY + 2, 12, 3);
+        ctx.fillStyle = '#6b4a2f'; ctx.fillRect(cx - 2, baseY - 4, 4, 5); // trunk
+        ctx.fillStyle = '#2e6b38';
+        const tiers = 5;
+        for (let k2 = 0; k2 < tiers; k2++) { // stacked boughs, rising with progress
+          if (th < (k2 + 1) * (TH / tiers) - 4) break;
+          const wy = baseY - 4 - (k2 + 1) * (th / tiers);
+          const ww = (TW / 2) * (1 - (k2 / tiers) * 0.72);
+          ctx.beginPath();
+          ctx.moveTo(cx - ww, wy + th / tiers + 2); ctx.lineTo(cx, wy); ctx.lineTo(cx + ww, wy + th / tiers + 2);
+          ctx.fill();
+        }
+        if (ft.phase === 'raising') {
+          ctx.fillStyle = '#8a6a3f'; // scaffold + riggers on ropes
+          ctx.fillRect(cx - 15, baseY - th - 2, 1, th + 2); ctx.fillRect(cx + 14, baseY - th - 2, 1, th + 2);
+          ctx.fillRect(cx - 15, baseY - th - 2, 30, 1);
+          const wf = Math.floor(now / 300) % 2;
+          const w1 = SPR.person('hiker', 91);
+          ctx.drawImage(w1.f[wf], cx - 21, baseY - w1.h);
+          ctx.drawImage(w1.f[1 - wf], cx + 15, baseY - w1.h);
+        } else {
+          // LIT: star on top, twinkling lights, glowing all night long
+          ctx.fillStyle = '#ffd870'; ctx.fillRect(cx - 1, baseY - th - 8, 3, 3); ctx.fillRect(cx, baseY - th - 10, 1, 1);
+          const tcols = ['#ff6060', '#ffd160', '#60c0ff', '#80ff90', '#ff90e0', '#c0a0ff'];
+          for (let k2 = 0; k2 < 26; k2++) {
+            if ((k2 + Math.floor(now / 400)) % 3 === 0) continue; // twinkle
+            const ph2 = (k2 * 37 % 100) / 100;
+            const ly = baseY - 5 - ph2 * (th - 8);
+            const lw = (TW / 2) * (1 - ph2 * 0.72) - 1;
+            ctx.fillStyle = tcols[k2 % tcols.length];
+            ctx.fillRect(cx + Math.sin(k2 * 2.7) * lw, ly, 1.5, 1.5);
+          }
+          ctx.fillStyle = '#c0392b'; ctx.fillRect(cx - 9, baseY - 3, 4, 3); // gifts at the base
+          ctx.fillStyle = '#4f9ed0'; ctx.fillRect(cx + 6, baseY - 2, 3, 3);
+          UI.lights.push({ x: cx, y: baseY - th / 2, r: 38, a: 0.9, tint: 'warm' });
+          UI.lights.push({ x: cx, y: baseY - th - 8, r: 12, a: 0.9, tint: 'orange' });
+          // the village celebrates under and around its tree
+          const holiday = Festivals.yearDay() === 24 || Festivals.yearDay() === 25;
+          if (holiday || Sim.clock >= 960 || Sim.clock < 60) {
+            const nC = holiday ? 12 : 8;
+            for (let k2 = 0; k2 < nC; k2++) {
+              const a2 = (k2 / nC) * 6.283 + 0.4;
+              const px2 = cx + Math.cos(a2) * (17 + (k2 % 3) * 5);
+              const py2 = baseY + 4 + Math.sin(a2) * 9;
+              const ps = SPR.person(['man', 'woman', 'kid'][k2 % 3], 401 + k2 * 13);
+              ctx.drawImage(ps.f[(Math.floor(now / 800) + k2) % 2], Math.round(px2) - 3, Math.round(py2) - ps.h);
+              if ((Math.floor(now / 1300) + k2) % 4 === 0) {
+                ctx.font = '6px "Segoe UI Emoji", serif';
+                ctx.fillText(['🎵', '☕', '🎵', '✨'][k2 % 4], Math.round(px2), Math.round(py2) - ps.h - 2);
+              }
+            }
+          }
+        }
+      }
     } else if (e.kind === 'boat') {
       const u = e.u;
       ctx.strokeStyle = 'rgba(220,240,252,0.3)';
@@ -707,7 +1017,8 @@ function render(now) {
       ctx.restore();
     }
     if (Math.random() < 0.3) UI.smoke.push({ x: c.x + (Math.random() * 10 - 5), y: c.y - 2, r: 1.5 + Math.random(), life: 0.8 });
-    if (c.t > 24) { ctx.globalAlpha = (c.t - 24) / 4; ctx.fillStyle = '#fff3c0'; ctx.beginPath(); ctx.arc(c.x, c.y, (28 - c.t) * 5, 0, 7); ctx.fill(); ctx.globalAlpha = 1; }
+    const ft = (c.t0 || 28) - c.t; // impact flash in the first 4 game-min
+    if (ft < 4) { ctx.globalAlpha = 1 - ft / 4; ctx.fillStyle = '#fff3c0'; ctx.beginPath(); ctx.arc(c.x, c.y, Math.max(0, ft * 5), 0, 7); ctx.fill(); ctx.globalAlpha = 1; }
   }
 
   updateSmoke(now);
@@ -745,6 +1056,24 @@ function render(now) {
     ctx.drawImage(SPR.heliRotor[Math.floor(now / 70) % 2], Math.round(h.x) - 10, Math.round(hy) - 8);
     if (dark > 0.12) UI.lights.push({ x: h.x, y: hy, r: 14, a: 0.8, tint: 'red' });
   }
+  // the tornado funnel, when the worst is on the ground
+  if (typeof Calamity !== 'undefined' && Calamity.tornado) {
+    const tn = Calamity.tornado;
+    ctx.globalAlpha = 0.25; ctx.fillStyle = '#1a2018'; // ground shadow
+    ctx.beginPath(); ctx.ellipse(tn.x, tn.y + 3, 8, 3, 0, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+    for (let k = 0; k < 7; k++) { // the whirling column
+      const rr = 3 + k * 2.2;
+      const off = Math.sin(tn.ph + k * 1.2) * (2 + k * 0.8);
+      ctx.fillStyle = `rgba(92,97,108,${0.6 - k * 0.055})`;
+      ctx.beginPath(); ctx.ellipse(tn.x + off, tn.y - k * 7, rr, rr * 0.45, 0, 0, 7); ctx.fill();
+    }
+    ctx.fillStyle = '#6e5a44'; // flying debris
+    for (let k = 0; k < 5; k++) {
+      const a = tn.ph * 2 + k * 1.3;
+      ctx.fillRect(tn.x + Math.cos(a) * (6 + k * 3), tn.y - 8 - k * 5 + Math.sin(a) * 4, 2, 2);
+    }
+  }
 
   /* ---- screen-space: dusk tint, darkness, emissive, precip ---- */
   const dt2 = duskTint();
@@ -759,8 +1088,12 @@ function render(now) {
     const litA = Math.min(1, dark * 1.8);
     for (const e of ents) {
       if (e.kind !== 'bld') continue;
-      const b = e.b, s = SPR.b[b.type][b.variant % SPR.b[b.type].length];
-      ctx.globalAlpha = litA;
+      const b = e.b;
+      const lf = buildingLit(b); // closed shops & sleeping homes stay dark
+      if (lf <= 0.05) continue;
+      const skey = (b.type === 'house' && b.level > 1) ? 'house' + b.level : b.type;
+      const s = SPR.b[skey][b.variant % SPR.b[skey].length];
+      ctx.globalAlpha = litA * lf;
       ctx.drawImage(s.lit, b.x * T, b.y * T - s.oy);
     }
     ctx.globalAlpha = 1;
@@ -843,6 +1176,8 @@ function render(now) {
     ctx.strokeStyle = '#ffe066'; ctx.lineWidth = 1.5 / z;
     ctx.strokeRect(b.x * T - 1, b.y * T - 1, b.w * T + 2, b.h * T + 2);
   } else if (UI.selected) { UI.selected = null; hideInfo(); }
+  // undo the earthquake jolt so the camera doesn't wander
+  UI.camX -= shakeRX; UI.camY -= shakeRY;
 }
 
 /* darkness overlay with light pools punched out */
@@ -953,6 +1288,7 @@ function afterMapEdit() {
   Sim.assignJobs();
   Sim.assignSchools();
   World.dirty = true;
+  if (typeof Life !== 'undefined') Life.trainT = 0; // re-check the railway right away
 }
 
 function placeAt(x, y) {
@@ -984,7 +1320,11 @@ function finishDragTool(x, y) {
   const d = CAT[UI.tool.key], s = UI.dragStart;
   if (!s) return;
   if (d.tool === 'road') { World.layRoadLine(s.x, s.y, x, y); afterMapEdit(); }
-  if (d.tool === 'rail') { World.layRailLine(s.x, s.y, x, y); afterMapEdit(); toast('Railway track laid 🛤️ — connect two train stations to start a service'); }
+  if (d.tool === 'rail') {
+    World.layRailLine(s.x, s.y, x, y); afterMapEdit();
+    const nst = World.buildings.filter(b => b.type === 'trainstation' && !b.ruined).length;
+    toast(nst >= 2 ? 'Railway track laid 🛤️' : 'Railway track laid 🛤️ — build two train stations to start a service');
+  }
   if (d.tool === 'river') { World.carveRiver(s.x, s.y, x, y, null); afterMapEdit(); toast('River carved 🏞️'); }
   UI.dragStart = null;
 }
@@ -1211,10 +1551,12 @@ function updateMinimap() {
   const put = (i, r, g2, b2) => { img.data[i * 4] = r; img.data[i * 4 + 1] = g2; img.data[i * 4 + 2] = b2; img.data[i * 4 + 3] = 255; };
   const hex = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
   const winter = Weather.season === 3;
+  const dry = typeof Calamity !== 'undefined' && Calamity.droughtLevel >= 0.5;
   for (let i = 0; i < GW * GH; i++) {
     const g0 = World.ground[i];
-    if (g0 === G_WATER) put(i, 63, 127, 208);
+    if (g0 === G_WATER) { if (dry && !winter) put(i, 201, 180, 138); else put(i, 63, 127, 208); }
     else if (g0 === G_ROCK) put(i, 126, 122, 114);
+    else if (g0 === G_SAND) put(i, winter ? 224 : 226, winter ? 226 : 211, winter ? 230 : 168);
     else if (World.tree[i]) put(i, winter ? 150 : 30, winter ? 160 : 58, winter ? 175 : 32);
     else if (World.railMap[i]) put(i, 122, 92, 56);
     else if (World.roadMap[i]) put(i, 44, 46, 52);
@@ -1330,6 +1672,8 @@ function loadGame() {
   if (extra._incompat) { toast('⚠️ That save is from the older, smaller map and can\'t be loaded here'); return; }
   Sim.reset(); Life.reset();
   if (typeof Gov !== 'undefined') Gov.reset();
+  if (typeof Calamity !== 'undefined') Calamity.reset();
+  if (typeof Festivals !== 'undefined') Festivals.reset();
   Sim.clock = extra.clock || 420; Sim.day = extra.day || 1;
   Sim.safety = extra.safety || 92;
   Life.arrests = extra.arrests || 0; Life.crimes = extra.crimes || 0;
@@ -1349,7 +1693,10 @@ function loadGame() {
 function newMap() {
   if (!confirm('Start a fresh map? Unsaved progress is lost.')) return;
   World.genStarterMap();
-  Sim.reset(); Life.reset(); if (typeof Gov !== 'undefined') Gov.reset(); Weather.init();
+  Sim.reset(); Life.reset(); if (typeof Gov !== 'undefined') Gov.reset();
+  if (typeof Calamity !== 'undefined') Calamity.reset();
+  if (typeof Festivals !== 'undefined') Festivals.reset();
+  Weather.init();
   hideInfo(); UI.selected = null;
   toast('New land discovered 🗺️ — drop a house to begin!');
 }
@@ -1366,6 +1713,8 @@ function frame(now) {
   if (spd > 0) {
     Sim.tick(dt * spd);
     Life.tick(dt * spd, dt);
+    if (typeof Calamity !== 'undefined') Calamity.tick(dt * spd);
+    if (typeof Festivals !== 'undefined') Festivals.tick(dt * spd);
   }
   // ribbon-cuttings: construction sites that just finished
   while (Sim.completed.length) {
@@ -1412,6 +1761,7 @@ function frame(now) {
     UI.lastStats = now;
     updateHUD();
     if (typeof Tasks !== 'undefined') { Tasks.render(); Tasks.badge(); }
+    if (typeof News !== 'undefined') News.tick(now);
     if (UI.selected && document.getElementById('info').style.display === 'block') showInfo(UI.selected);
   }
   requestAnimationFrame(frame);
@@ -1455,6 +1805,8 @@ setInterval(() => {
     remaining -= step;
     Sim.tick(step);
     Life.tick(step, step);
+    if (typeof Calamity !== 'undefined') Calamity.tick(step);
+    if (typeof Festivals !== 'undefined') Festivals.tick(step);
     Weather.tick(step, step, () => {});
   }
   while (Sim.completed.length) {
@@ -1472,8 +1824,11 @@ function boot() {
   Weather.init();
   Life.reset();
   if (typeof Gov !== 'undefined') Gov.reset();
+  if (typeof Calamity !== 'undefined') Calamity.reset();
+  if (typeof Festivals !== 'undefined') Festivals.reset();
   Life.onEvent = toast;
   buildPalette();
+  if (typeof News !== 'undefined') News.init();
   resize();
   window.addEventListener('resize', resize);
   UI.camX = (GW * T) / 2 - canvas.width / (2 * UI.zoom);
