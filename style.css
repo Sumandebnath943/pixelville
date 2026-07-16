@@ -151,6 +151,7 @@ body {
 }
 #speed button:last-child { border-right: none; }
 #speed button:hover { color: var(--text); background: var(--bg-3); }
+#speed button.locked { opacity: 0.3; cursor: not-allowed; }
 #speed button.active { background: var(--accent); color: #171207; }
 
 #filebtns { display: flex; gap: 5px; }

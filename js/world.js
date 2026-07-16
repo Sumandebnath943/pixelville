@@ -20,6 +20,8 @@ const World = {
   nextId: 1,
   dirty: true,                         // ground layer needs re-render
   railStamp: 0,                        // bumped on every rail edit (train line re-check)
+  signals: new Set(),                  // road-junction tiles governed by traffic lights
+  crossings: new Set(),                // rail-over-road tiles with level-crossing gates
   onChange: null,                      // callback
 
   idx(x, y) { return y * GW + x; },
@@ -30,6 +32,7 @@ const World = {
   reset() {
     this.ground.fill(0); this.tree.fill(0); this.roadMap.fill(0); this.railMap.fill(0); this.bmap.fill(0);
     this.buildings = []; this.mountains = []; this.nextId = 1; this.dirty = true; this.railStamp++;
+    this.signals.clear(); this.crossings.clear();
   },
 
   /* ---------- initial scenery ---------- */

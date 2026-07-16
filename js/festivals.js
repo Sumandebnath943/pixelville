@@ -19,9 +19,20 @@
 
 const Festivals = {
   tree: null,          // { year, x, y, src, phase, prog, haulPath }
+  markets: [],         // {x, y, seed} — big Christmas markets, all season
+  carolers: [],        // {x, y, seed} — singing groups outside homes
+  santa: null,         // Santa walking the streets by day
+  sleigh: null,        // …and flying at midnight
+  sleighDay: 0,
+  carolT: 0,
+  _seasonOn: false,
   lastAnnounce: '',
 
-  reset() { this.tree = null; this.lastAnnounce = ''; },
+  reset() {
+    this.tree = null; this.lastAnnounce = '';
+    this.markets = []; this.carolers = []; this.santa = null; this.sleigh = null;
+    this.sleighDay = 0; this.carolT = 0; this._seasonOn = false;
+  },
   say(m) { if (typeof Life !== 'undefined') Life.say(m); },
 
   yearDay() { return ((Sim.day - 1) % 28) + 1; },
@@ -42,7 +53,93 @@ const Festivals = {
   tick(dtSim) {
     const gm = dtSim * MIN_PER_SEC;
     this.tickTree(gm);
+    this.tickSeason(gm);
     this.announce();
+  },
+
+  /* ---------- the Christmas month: markets, carolers, Santa ---------- */
+  tickSeason(gm) {
+    const on = this.isChristmasSeason() && Sim.people.length >= 8;
+    if (on && !this._seasonOn) { this._seasonOn = true; this.setupMarkets(); }
+    if (!on) {
+      if (this._seasonOn) { this._seasonOn = false; this.markets = []; this.carolers = []; this.santa = null; this.sleigh = null; }
+      return;
+    }
+    // carol groups move from doorstep to doorstep
+    this.carolT -= gm;
+    if (this.carolT <= 0) {
+      this.carolT = 90 + Math.random() * 70;
+      this.carolers = [];
+      const spots = World.buildings.filter(b => b.connected && !b.ruined && !b.construction &&
+        (CAT[b.type].res && b.residents.length || b.type === 'church'));
+      for (let k = 0; k < Math.min(4, 1 + (spots.length / 8 | 0)); k++) {
+        const b = spots[(Math.random() * spots.length) | 0];
+        this.carolers.push({ x: b.door.x * T + 8, y: b.door.y * T + 12, seed: b.id * 31 + k });
+      }
+    }
+    // Santa strolls the streets by day, sack over his shoulder
+    if (!this.santa && Sim.clock > 540 && Sim.clock < 1200 && Math.random() < gm * 0.012) {
+      const roads = [];
+      for (let i = 0; i < World.roadMap.length; i++) if (World.roadMap[i]) roads.push(i);
+      if (roads.length > 20) {
+        const a = roads[(Math.random() * roads.length) | 0], b = roads[(Math.random() * roads.length) | 0];
+        const path = World.roadPath(a % GW, (a / GW) | 0, b % GW, (b / GW) | 0);
+        if (path && path.length > 14) this.santa = { path, prog: 0, x: path[0][0] * T + 8, y: path[0][1] * T + 8, dirx: 1, diry: 0 };
+      }
+    }
+    if (this.santa) {
+      this.santa.prog += 0.55 * (gm / MIN_PER_SEC);
+      Life.followPath(this.santa, this.santa.path, this.santa.prog, 5.5);
+      if (this.santa.prog >= this.santa.path.length - 1) this.santa = null;
+    }
+    // …and at midnight, the sleigh crosses the sky, dropping gifts
+    const midnight = Sim.clock >= 1420 || Sim.clock < 30;
+    if (!this.sleigh && midnight && this.sleighDay !== Sim.day) {
+      this.sleighDay = Sim.day;
+      this.sleigh = { x: -50, y: 50 + Math.random() * (GH * T * 0.5), ph: Math.random() * 7 };
+      this.say('🛷 Bells in the midnight sky — SANTA is over the village, delivering gifts rooftop to rooftop!');
+    }
+    if (this.sleigh) {
+      const dts = gm / MIN_PER_SEC;
+      this.sleigh.x += 66 * dts;
+      this.sleigh.ph += dts * 2;
+      if (Math.random() < dts * 2.2 && typeof Life !== 'undefined' && Life.sparks.length < 220)
+        Life.sparks.push({ // a gift twinkles down over the rooftops
+          x: this.sleigh.x - 8, y: this.sleigh.y + 10 + Math.random() * 8,
+          vx: (Math.random() - 0.5) * 6, vy: 14 + Math.random() * 10,
+          life: 1.5, hue: Math.random() < 0.5 ? '#ffd160' : '#ff90e0',
+        });
+      if (this.sleigh.x > GW * T + 60) this.sleigh = null;
+    }
+  },
+
+  /* the big Christmas markets: 2–3 of them, placed on open ground by the roads */
+  setupMarkets() {
+    this.markets = [];
+    const roads = [];
+    for (let i = 0; i < World.roadMap.length; i++) if (World.roadMap[i]) roads.push(i);
+    if (roads.length < 20) return;
+    const want = Math.min(3, 1 + Math.floor(Sim.people.length / 50));
+    for (let tries = 0; tries < 500 && this.markets.length < want; tries++) {
+      const r = roads[(Math.random() * roads.length) | 0];
+      const rx = r % GW, ry = (r / GW) | 0;
+      const x = rx - 2 + ((Math.random() * 6) | 0) - 2, y = ry + 1 + ((Math.random() * 3) | 0);
+      let ok = true;
+      for (let j = 0; j < 4 && ok; j++) for (let i2 = 0; i2 < 5; i2++) {
+        const xx = x + i2, yy = y + j;
+        if (!World.inB(xx, yy)) { ok = false; break; }
+        const k = World.idx(xx, yy);
+        if (World.ground[k] !== G_GRASS || World.bmap[k] || World.roadMap[k] || World.railMap[k]) { ok = false; break; }
+      }
+      if (!ok) continue;
+      if (this.markets.some(m => Math.abs(m.x - x) + Math.abs(m.y - y) < 30)) continue;
+      if (this.tree && Math.abs(this.tree.x - x) + Math.abs(this.tree.y - y) < 9) continue;
+      this.markets.push({ x, y, seed: (Math.random() * 1e6) | 0 });
+    }
+    if (this.markets.length) {
+      this.say(`🎪 The Christmas markets are OPEN — ${this.markets.length} of them across town! Stalls, lights, roast chestnuts and mulled cocoa.`);
+      if (typeof News !== 'undefined') News.breaking('Christmas markets open across town — lights, stalls and cocoa');
+    }
   },
 
   /* ---------- once-a-day festival announcements & effects ---------- */

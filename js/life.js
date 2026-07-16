@@ -346,6 +346,12 @@ const Life = {
     }
     for (const bus of this.buses) {
       if (bus.pause > 0) { bus.pause -= gm; continue; }
+      // buses wait at closed level-crossing gates like everyone else
+      const bni = bus.dir > 0 ? Math.ceil(bus.prog) : Math.floor(bus.prog);
+      if (World.crossings.size && bni !== bus.prog && bni >= 0 && bni < bus.route.length) {
+        const [bnx, bny] = bus.route[bni];
+        if (World.crossings.has(World.idx(bnx, bny)) && this.trainNearTile(bnx, bny, 7)) continue;
+      }
       bus.prog += 1.9 * dt * bus.dir;
       if (bus.prog >= bus.route.length - 1) { bus.prog = bus.route.length - 1; bus.dir = -1; bus.pause = 5; }
       if (bus.prog <= 0) { bus.prog = 0; bus.dir = 1; bus.pause = 5; }
@@ -1439,6 +1445,13 @@ const Life = {
     }
     this.crime = null;
     this.cooldown = 380 + Math.random() * 400;
+  },
+
+  /* is any train within r tiles of this spot? (level-crossing gates ask) */
+  trainNearTile(x, y, r) {
+    for (const tr of this.trains)
+      if (Math.abs(tr.x / T - x) + Math.abs(tr.y / T - y) < r) return true;
+    return false;
   },
 
   /* shared path-follower (tile paths → px position with lane offset) */

@@ -42,6 +42,7 @@ function rebuildGround() {
 
   const drought = typeof Calamity !== 'undefined' && Calamity.droughtLevel >= 0.5;
   const sandSpots = [];
+  const snowmenSpots = [];
 
   /* pass 1 — base terrain + procedural ground props */
   for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
@@ -74,6 +75,7 @@ function rebuildGround() {
       g.drawImage(grassSet[hh % 4], x * T, y * T);
       // scattered props on open grass
       if (!World.tree[i] && !World.roadMap[i] && !World.bmap[i]) {
+        if (winter && hh % 47 === 0) snowmenSpots.push([x, y]); // the kids have been busy
         if (hh % 71 === 0) { // worn dirt patch
           g.fillStyle = winter ? 'rgba(210,220,232,0.5)' : 'rgba(150,124,80,0.28)';
           g.beginPath(); g.ellipse(x * T + 8, y * T + 8, 6, 4, 0, 0, 7); g.fill();
@@ -116,13 +118,22 @@ function rebuildGround() {
     }
   }
 
-  /* pass 3 — roads over everything, with crosswalks & manholes */
+  /* pass 3 — roads over everything, with crosswalks, manholes & signals */
   const popcount = m => ((m & 1) + ((m >> 1) & 1) + ((m >> 2) & 1) + ((m >> 3) & 1));
+  World.signals.clear();
+  UI.signalHeads = [];
+  const is4way = (xx, yy) => World.isRoad(xx, yy) && popcount(World.roadMask(xx, yy)) === 4;
   for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
     const i = World.idx(x, y);
     if (!World.roadMap[i]) continue;
     const gr = World.ground[i];
     const m = World.roadMask(x, y);
+    // avenue intersections (2x2 blocks of 4-way tiles) get traffic lights;
+    // the head is drawn once, at the top-left corner of the junction box
+    if (popcount(m) === 4) {
+      World.signals.add(i);
+      if (!is4way(x - 1, y) && !is4way(x, y - 1)) UI.signalHeads.push([x, y]);
+    }
     if (gr === G_WATER) { g.drawImage((m & 10) ? SPR.bridgeH : SPR.bridgeV, x * T, y * T); }
     else {
       g.drawImage(SPR.roads[m], x * T, y * T);
@@ -146,6 +157,9 @@ function rebuildGround() {
 
   /* pass 3.5 — railway tracks: ballast on grass, bare rails over level
      crossings, wooden trestle bridges across open water */
+  World.crossings.clear();
+  UI.crossingSpots = [];
+  UI.railSignalSpots = [];
   for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
     const i = World.idx(x, y);
     if (!World.railMap[i]) continue;
@@ -155,9 +169,11 @@ function rebuildGround() {
       g.drawImage(SPR.railsBare[m], x * T, y * T);
     } else {
       g.drawImage(World.roadMap[i] ? SPR.railsBare[m] : SPR.rails[m], x * T, y * T);
-      if (World.roadMap[i]) { // level-crossing warning posts
-        g.fillStyle = '#e8e4cf'; g.fillRect(x * T + 1, y * T + 1, 1, 3); g.fillRect(x * T + T - 2, y * T + T - 4, 1, 3);
-        g.fillStyle = '#c65f4e'; g.fillRect(x * T + 1, y * T + 1, 1, 1); g.fillRect(x * T + T - 2, y * T + T - 4, 1, 1);
+      if (World.roadMap[i]) { // level crossing: gates + blinkers animate at render time
+        World.crossings.add(i);
+        UI.crossingSpots.push([x, y, (m & 5) ? 1 : 0]); // 1 = rail runs north–south
+      } else if ((m === 5 || m === 10) && (x * 13 + y * 7) % 9 === 0) {
+        UI.railSignalSpots.push([x, y, m === 5 ? 1 : 0]); // line-side signals on straights
       }
     }
   }
@@ -181,6 +197,8 @@ function rebuildGround() {
     UI.staticEnts.push({ kind: 'mtn', x: m.x, y: m.y, v: (m.v || 0) % SPR.mountains.length, base: (m.y + MSIZE) * T, m });
   for (const b of World.buildings)
     UI.staticEnts.push({ kind: 'bld', b, x: b.x, base: (b.y + b.h) * T });
+  for (const [sx, sy] of snowmenSpots)
+    UI.staticEnts.push({ kind: 'snowman', x: sx, y: sy, base: sy * T + T });
   UI.staticEnts.sort((a, b) => a.base - b.base);
 
   // firefly homes: a sample of tree spots
@@ -298,11 +316,94 @@ function render(now) {
     }
   }
 
-  // street lamp posts + their light sources
+  // street lamp posts + their light sources (dressed up on festival days)
+  const xmasNow = typeof Festivals !== 'undefined' && Festivals.decorated();
+  const diwaliNow = typeof Festivals !== 'undefined' && Festivals.diyasTonight();
   for (const [x, y] of UI.lampSpots) {
     if (x < vx0 || x > vx1 || y < vy0 || y > vy1) continue;
     ctx.drawImage(SPR.lamp, x * T + 11, y * T - 8);
+    if (xmasNow) { // garland spiral + red bow + a string of coloured bulbs
+      const gcols = ['#ff6060', '#ffd160', '#60c0ff', '#80ff90'];
+      ctx.fillStyle = '#2e6b38';
+      ctx.fillRect(x * T + 12, y * T - 6, 1, 1); ctx.fillRect(x * T + 14, y * T - 3, 1, 1); ctx.fillRect(x * T + 12, y * T, 1, 1);
+      ctx.fillStyle = '#c0392b'; ctx.fillRect(x * T + 12, y * T - 8, 3, 2); // bow
+      for (let k = 0; k < 4; k++) { // swag of lights hanging streetward
+        ctx.fillStyle = gcols[(k + Math.floor(now / 500)) % 4];
+        ctx.fillRect(x * T + 8 - k * 3, y * T - 6 + Math.round(Math.sin(k * 1.2) * 2) + 2, 1, 1);
+      }
+    }
+    if (diwaliNow) { // marigold garland
+      ctx.fillStyle = '#e8962c'; ctx.fillRect(x * T + 12, y * T - 6, 3, 1);
+      ctx.fillStyle = '#f2c14f'; ctx.fillRect(x * T + 12, y * T - 4, 3, 1);
+    }
     if (dark > 0.1) UI.lights.push({ x: x * T + 13, y: y * T + 2, r: 24, a: 0.85, tint: 'warm' });
+  }
+
+  // traffic lights at avenue intersections (cars genuinely obey them)
+  const nsGreen = Math.floor(Sim.clock / 2.5) % 2 === 0;
+  for (const [x, y] of UI.signalHeads || []) {
+    if (x < vx0 - 1 || x > vx1 || y < vy0 - 1 || y > vy1) continue;
+    const px0 = x * T - 4, py0 = y * T - 10;
+    ctx.fillStyle = '#3c4048'; ctx.fillRect(px0 + 2, py0 + 8, 1, 10);          // pole
+    ctx.fillStyle = '#26282e'; ctx.fillRect(px0, py0, 5, 9);                    // head
+    ctx.fillStyle = nsGreen ? '#802020' : '#ff5040'; ctx.fillRect(px0 + 1, py0 + 1, 3, 3);   // EW aspect
+    ctx.fillStyle = nsGreen ? '#40e050' : '#1e5a28'; ctx.fillRect(px0 + 1, py0 + 5, 3, 3);   // NS aspect
+    if (dark > 0.15) UI.lights.push({ x: px0 + 2, y: py0 + 4, r: 8, a: 0.7, tint: nsGreen ? 'green' : 'red' });
+  }
+
+  // level-crossing gates: barriers drop and blinkers flash while a train is near
+  for (const [x, y, railNS] of UI.crossingSpots || []) {
+    if (x < vx0 || x > vx1 || y < vy0 || y > vy1) continue;
+    const closed = Life.trainNearTile(x, y, 7);
+    if (closed) {
+      const blink = Math.floor(now / 260) % 2;
+      ctx.fillStyle = '#e8e4cf';
+      if (railNS) { // rail runs N–S: bars block the road on both sides of the track
+        for (const gx of [x * T + 1, x * T + T - 3]) {
+          ctx.fillRect(gx, y * T + 1, 2, T - 2);
+          ctx.fillStyle = '#c65f4e';
+          for (let sy2 = y * T + 2; sy2 < y * T + T - 2; sy2 += 4) ctx.fillRect(gx, sy2, 2, 2);
+          ctx.fillStyle = '#e8e4cf';
+        }
+      } else {
+        for (const gy of [y * T + 1, y * T + T - 3]) {
+          ctx.fillRect(x * T + 1, gy, T - 2, 2);
+          ctx.fillStyle = '#c65f4e';
+          for (let sx2 = x * T + 2; sx2 < x * T + T - 2; sx2 += 4) ctx.fillRect(sx2, gy, 2, 2);
+          ctx.fillStyle = '#e8e4cf';
+        }
+      }
+      ctx.fillStyle = blink ? '#ff4040' : '#701818';
+      ctx.fillRect(x * T + 1, y * T - 3, 2, 2); ctx.fillRect(x * T + T - 3, y * T - 3, 2, 2);
+      if (dark > 0.15 && blink) UI.lights.push({ x: x * T + 8, y: y * T, r: 10, a: 0.8, tint: 'red' });
+    }
+  }
+
+  // line-side railway signals: red while a train is in the block, green after
+  for (const [x, y, vert] of UI.railSignalSpots || []) {
+    if (x < vx0 || x > vx1 || y < vy0 || y > vy1) continue;
+    const occupied = Life.trainNearTile(x, y, 8);
+    const sx2 = vert ? x * T + T - 2 : x * T + 2, sy2 = vert ? y * T + 4 : y * T - 6;
+    ctx.fillStyle = '#3c4048'; ctx.fillRect(sx2, sy2 + 2, 1, 6);
+    ctx.fillStyle = '#26282e'; ctx.fillRect(sx2 - 1, sy2 - 2, 3, 5);
+    ctx.fillStyle = occupied ? '#ff5040' : '#40e050';
+    ctx.fillRect(sx2, sy2 - 1, 1, 2);
+    if (dark > 0.2) UI.lights.push({ x: sx2, y: sy2, r: 6, a: 0.6, tint: occupied ? 'red' : 'green' });
+  }
+
+  // Diwali: little oil lamps line the streets themselves
+  if (diwaliNow && dark > 0.2) {
+    for (let ty2 = Math.max(0, vy0); ty2 <= Math.min(GH - 1, vy1); ty2++)
+      for (let tx2 = Math.max(0, vx0); tx2 <= Math.min(GW - 1, vx1); tx2++) {
+        const ri = World.idx(tx2, ty2);
+        if (!World.roadMap[ri] || (tx2 * 7 + ty2 * 13) % 6 !== 0) continue;
+        const flick = (tx2 + ty2 + Math.floor(now / 240)) % 3;
+        ctx.fillStyle = flick ? '#ffd870' : '#ff9040';
+        ctx.fillRect(tx2 * T + 2, ty2 * T + 2, 1, 1);
+        ctx.fillRect(tx2 * T + T - 3, ty2 * T + T - 3, 1, 1);
+        if ((tx2 * 31 + ty2 * 17) % 18 === 0)
+          UI.lights.push({ x: tx2 * T + 8, y: ty2 * T + 8, r: 12, a: 0.5, tint: 'orange' });
+      }
   }
 
   /* ---- entities (painter-sorted, with soft shadows) ---- */
@@ -350,8 +451,12 @@ function render(now) {
     ents.push({ kind: 'reporter', rp, x: rx, y: ry2, base: ry2 + 4 });
   }
   for (const bf of Life.beachfolk) ents.push({ kind: 'beach', bf, base: bf.y + 4 });
-  if (typeof Festivals !== 'undefined' && Festivals.tree)
-    ents.push({ kind: 'xmastree', ft: Festivals.tree, base: (Festivals.tree.y + 2) * T });
+  if (typeof Festivals !== 'undefined') {
+    if (Festivals.tree) ents.push({ kind: 'xmastree', ft: Festivals.tree, base: (Festivals.tree.y + 2) * T });
+    for (const mk of Festivals.markets) ents.push({ kind: 'xmarket', mk, base: (mk.y + 4) * T });
+    for (const cg of Festivals.carolers) ents.push({ kind: 'carolers', cg, base: cg.y + 4 });
+    if (Festivals.santa) ents.push({ kind: 'santa', sn: Festivals.santa, base: Festivals.santa.y + 4 });
+  }
   if (Life.ferry) ents.push({ kind: 'ferry', u: Life.ferry, base: Life.ferry.y + 5 });
   for (const cc of Life.campaignCars) ents.push({ kind: 'campcar', u: cc, base: cc.y + 4 });
   // campaign camps: tents with volunteers, one per candidate
@@ -428,27 +533,57 @@ function render(now) {
         ctx.fillStyle = 'rgba(190,225,250,0.5)';
         ctx.fillRect(b.x * T - 2 + (Math.floor(now / 500) % 2) * 5, (b.y + b.h) * T - 7, 4, 1);
       }
-      // festival dress: Christmas light-strings & wreaths for a whole month
+      // festival dress: Christmas light-strings, icicles & wreaths all month
       if (typeof Festivals !== 'undefined' && Festivals.decorated()) {
         const fcols = ['#ff6060', '#ffd160', '#60c0ff', '#80ff90', '#ff90e0'];
         const ry2 = b.y * T - s.oy + 2;
-        for (let lx = b.x * T + 2; lx < b.x * T + b.w * T - 1; lx += 3) {
-          ctx.fillStyle = fcols[((lx >> 2) + Math.floor(now / 500)) % fcols.length];
-          ctx.fillRect(lx, ry2 + ((lx >> 1) % 2), 1, 1);
+        for (let lx = b.x * T + 1; lx < b.x * T + b.w * T - 1; lx += 2) { // roofline lights, 2px
+          ctx.fillStyle = fcols[((lx >> 1) + Math.floor(now / 450)) % fcols.length];
+          ctx.fillRect(lx, ry2 + ((lx >> 1) % 2), 2, 2);
+        }
+        ctx.fillStyle = 'rgba(220,240,255,0.8)'; // icicle lights under the eaves
+        for (let lx = b.x * T + 3; lx < b.x * T + b.w * T - 2; lx += 5)
+          ctx.fillRect(lx, ry2 + 3, 1, 2 + (lx >> 1) % 2);
+        if (CAT[b.type].noroof) { // parks, plazas & grounds get a full light perimeter
+          for (let lx = b.x * T; lx < (b.x + b.w) * T; lx += 3) {
+            ctx.fillStyle = fcols[((lx >> 1) + Math.floor(now / 450)) % fcols.length];
+            ctx.fillRect(lx, (b.y + b.h) * T - 2, 2, 2);
+          }
+          for (let ly = b.y * T; ly < (b.y + b.h) * T; ly += 3) {
+            ctx.fillStyle = fcols[((ly >> 1) + Math.floor(now / 450)) % fcols.length];
+            ctx.fillRect(b.x * T, ly, 2, 2); ctx.fillRect((b.x + b.w) * T - 2, ly, 2, 2);
+          }
         }
         if (CAT[b.type].res) { // wreath on the door
-          ctx.fillStyle = '#2e6b38'; ctx.fillRect(b.door.x * T + 6, (b.y + b.h) * T - 8, 3, 3);
-          ctx.fillStyle = '#c0392b'; ctx.fillRect(b.door.x * T + 7, (b.y + b.h) * T - 6, 1, 1);
+          ctx.fillStyle = '#2e6b38'; ctx.fillRect(b.door.x * T + 5, (b.y + b.h) * T - 9, 4, 4);
+          ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(b.door.x * T + 6, (b.y + b.h) * T - 8, 2, 2);
+          ctx.fillStyle = '#c0392b'; ctx.fillRect(b.door.x * T + 6, (b.y + b.h) * T - 6, 2, 1);
         }
+        if (dark > 0.15) UI.lights.push({ x: b.x * T + b.w * 8, y: b.y * T - s.oy + 3, r: b.w * 9, a: 0.45, tint: 'pink' });
       }
-      // Diwali: rows of little diyas flicker along every building's base
+      // Diwali: dense rows of flickering diyas, warm strings and a rangoli
       if (typeof Festivals !== 'undefined' && Festivals.diyasTonight() && dark > 0.2) {
-        for (let lx = b.x * T + 2; lx < b.x * T + b.w * T - 2; lx += 4) {
-          ctx.fillStyle = '#ffb050'; ctx.fillRect(lx, (b.y + b.h) * T - 2, 1, 1);
-          ctx.fillStyle = (lx + Math.floor(now / 260)) % 3 ? '#ffd870' : '#ff9040';
-          ctx.fillRect(lx, (b.y + b.h) * T - 3, 1, 1);
+        for (let lx = b.x * T + 2; lx < b.x * T + b.w * T - 2; lx += 3) { // diyas along the base
+          const flick = (lx + Math.floor(now / 240)) % 3;
+          ctx.fillStyle = '#c8845a'; ctx.fillRect(lx, (b.y + b.h) * T - 2, 2, 1); // clay lamp
+          ctx.fillStyle = flick ? '#ffd870' : '#ff9040';
+          ctx.fillRect(lx, (b.y + b.h) * T - 4, 2, 2);                            // the flame
         }
-        UI.lights.push({ x: b.x * T + b.w * 8, y: (b.y + b.h) * T - 2, r: b.w * 10, a: 0.5, tint: 'orange' });
+        ctx.fillStyle = '#e8962c'; // warm string along the roofline
+        for (let lx = b.x * T + 2; lx < b.x * T + b.w * T - 1; lx += 4) {
+          ctx.fillStyle = (lx + Math.floor(now / 400)) % 2 ? '#e8962c' : '#ffd870';
+          ctx.fillRect(lx, b.y * T - s.oy + 2, 2, 1);
+        }
+        if (CAT[b.type].res) { // rangoli at the doorstep
+          const rcols = ['#e05a5a', '#f2c14f', '#5fae62', '#c05fa8'];
+          const rx0 = b.door.x * T + 8, ry0 = (b.y + b.h) * T + 4;
+          for (let k = 0; k < 4; k++) {
+            ctx.fillStyle = rcols[k];
+            ctx.fillRect(rx0 - 1 + Math.round(Math.cos(k * 1.57) * 3), ry0 + Math.round(Math.sin(k * 1.57) * 2), 2, 1);
+          }
+          ctx.fillStyle = '#f5f1e4'; ctx.fillRect(rx0 - 1, ry0, 2, 1);
+        }
+        UI.lights.push({ x: b.x * T + b.w * 8, y: (b.y + b.h) * T - 2, r: b.w * 12, a: 0.6, tint: 'orange' });
       }
       // Easter: painted eggs on the doorstep
       if (typeof Festivals !== 'undefined' && Festivals.isEaster() && CAT[b.type].res) {
@@ -766,6 +901,91 @@ function render(now) {
         shadow(bf.x, bf.y + 1.5, 3, 1.2);
         ctx.drawImage(spr.f[Math.floor(now / 600 + bf.seed) % 2], Math.round(bf.x) - 3, Math.round(bf.y) - spr.h + 1 + bob);
       }
+    } else if (e.kind === 'snowman') {
+      if (typeof Festivals === 'undefined' || !Festivals.decorated()) continue;
+      const sx2 = e.x * T + 8, sy2 = e.y * T + 12;
+      shadow(sx2, sy2 + 2, 5, 1.6);
+      ctx.fillStyle = '#f4f7fb';
+      ctx.beginPath(); ctx.arc(sx2, sy2, 4, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(sx2, sy2 - 6, 3, 0, 7); ctx.fill();
+      ctx.fillStyle = '#26282e';
+      ctx.fillRect(sx2 - 1.5, sy2 - 7.5, 1, 1); ctx.fillRect(sx2 + 0.5, sy2 - 7.5, 1, 1); // coal eyes
+      ctx.fillRect(sx2 - 3, sy2 - 11, 6, 2); ctx.fillRect(sx2 - 2, sy2 - 13, 4, 2);      // top hat
+      ctx.fillStyle = '#e0862c'; ctx.fillRect(sx2, sy2 - 6, 3, 1);                        // carrot
+      ctx.fillStyle = '#c0392b'; ctx.fillRect(sx2 - 3, sy2 - 4, 6, 1);                    // scarf
+    } else if (e.kind === 'xmarket') {
+      const mk = e.mk;
+      const mx0 = mk.x * T, my0 = mk.y * T;
+      // fairy-light perimeter
+      const mcols = ['#ff6060', '#ffd160', '#60c0ff', '#80ff90', '#ff90e0'];
+      for (let k = 0; k < 26; k++) {
+        const per = k / 26;
+        const lx = per < 0.5 ? mx0 + per * 2 * 80 : mx0 + 80 - (per - 0.5) * 2 * 80;
+        const ly = per < 0.5 ? my0 - 2 : my0 + 64;
+        if ((k + Math.floor(now / 400)) % 4 === 0) continue;
+        ctx.fillStyle = mcols[k % 5];
+        ctx.fillRect(lx, ly, 1.5, 1.5);
+      }
+      // rows of striped stalls
+      for (let k = 0; k < 5; k++) {
+        const stx = mx0 + 2 + (k % 3) * 26, sty = my0 + 4 + ((k / 3) | 0) * 30;
+        const c1 = k % 2 ? '#c0392b' : '#2e6b38';
+        for (let i2 = 0; i2 < 20; i2++) ctx.fillStyle = (i2 >> 2) % 2 ? c1 : '#f5f1e4', ctx.fillRect(stx + i2, sty, 1, 5); // canopy
+        ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(stx, sty + 5, 20, 1);
+        ctx.fillStyle = '#8a6a45'; ctx.fillRect(stx + 1, sty + 9, 18, 6); // counter
+        ctx.fillStyle = '#5d4630'; ctx.fillRect(stx + 1, sty + 14, 18, 1);
+        for (let i2 = 0; i2 < 4; i2++) ctx.fillStyle = mcols[(k + i2) % 5], ctx.fillRect(stx + 3 + i2 * 4, sty + 10, 2, 2); // wares
+        if ((k + Math.floor(now / 700)) % 3 === 0) UI.smoke.push && Math.random() < 0.02 &&
+          UI.smoke.push({ x: stx + 16, y: sty + 6, r: 0.8, life: 0.5 }); // cocoa steam
+      }
+      // the star pole at the heart of the market
+      ctx.fillStyle = '#8a6a45'; ctx.fillRect(mx0 + 38, my0 + 22, 2, 18);
+      ctx.fillStyle = '#ffd870'; ctx.fillRect(mx0 + 36, my0 + 18, 6, 6); ctx.fillRect(mx0 + 38, my0 + 16, 2, 2);
+      // shoppers milling between the stalls
+      const nShop = 6 + (mk.seed % 4);
+      for (let k = 0; k < nShop; k++) {
+        const hh = (mk.seed + k * 131) >>> 0;
+        const ps = SPR.person(['man', 'woman', 'kid'][k % 3], hh);
+        const wob = Math.sin(now / 900 + k * 1.7) * 3;
+        ctx.drawImage(ps.f[(Math.floor(now / 700) + k) % 2],
+          mx0 + 6 + (hh % 66) + wob, my0 + 8 + ((hh >> 5) % 48) - ps.h);
+        if ((Math.floor(now / 1400) + k) % 5 === 0) {
+          ctx.font = '6px "Segoe UI Emoji", serif';
+          ctx.fillText(['🎁', '☕', '🍪', '🎄', '✨'][k % 5], mx0 + 6 + (hh % 66) + wob, my0 + ((hh >> 5) % 48) - 4);
+        }
+      }
+      if (dark > 0.1) {
+        UI.lights.push({ x: mx0 + 40, y: my0 + 28, r: 52, a: 0.85, tint: 'warm' });
+        UI.lights.push({ x: mx0 + 12, y: my0 + 10, r: 20, a: 0.6, tint: 'pink' });
+        UI.lights.push({ x: mx0 + 66, y: my0 + 44, r: 20, a: 0.6, tint: 'green' });
+      }
+    } else if (e.kind === 'carolers') {
+      const cg = e.cg;
+      for (let k = 0; k < 3; k++) {
+        const ps = SPR.person(['woman', 'man', 'kid'][k], cg.seed + k * 7);
+        ctx.drawImage(ps.f[(Math.floor(now / 600) + k) % 2], Math.round(cg.x) - 8 + k * 7, Math.round(cg.y) - ps.h);
+      }
+      ctx.fillStyle = '#ffd870'; ctx.fillRect(Math.round(cg.x) + 12, Math.round(cg.y) - 6, 2, 3); // lantern
+      if ((Math.floor(now / 800)) % 2) {
+        ctx.font = '7px "Segoe UI Emoji", serif';
+        ctx.fillText('🎵', Math.round(cg.x) - 2, Math.round(cg.y) - 12);
+      }
+      if (dark > 0.15) UI.lights.push({ x: cg.x, y: cg.y - 5, r: 14, a: 0.7, tint: 'warm' });
+    } else if (e.kind === 'santa') {
+      const sn = e.sn;
+      shadow(sn.x, sn.y + 1.5, 4, 1.4);
+      ctx.drawImage(SPR.santa[frame], Math.round(sn.x) - 4, Math.round(sn.y) - 10);
+      // a trail of delighted kids
+      for (let k = 0; k < 2; k++) {
+        const ps = SPR.person('kid', 601 + k * 13);
+        const o2 = { x: 0, y: 0 };
+        Life.followPath(o2, sn.path, Math.max(0, sn.prog - 1.1 - k * 0.9), 5.5);
+        ctx.drawImage(ps.f[(frame + k) % 2], Math.round(o2.x) - 3, Math.round(o2.y) - ps.h + 1);
+      }
+      if ((Math.floor(now / 1000)) % 3 === 0) {
+        ctx.font = '7px "Segoe UI Emoji", serif';
+        ctx.fillText('🎅', Math.round(sn.x) - 3, Math.round(sn.y) - 13);
+      }
     } else if (e.kind === 'xmastree') {
       const ft = e.ft;
       const cx = ft.x * T + 16, baseY = (ft.y + 2) * T - 2;
@@ -790,52 +1010,74 @@ function render(now) {
         ctx.beginPath(); ctx.moveTo(o.x + 15, o.y); ctx.lineTo(o.x + 1, o.y - 4); ctx.lineTo(o.x + 1, o.y + 4); ctx.fill();
         if ((Math.floor(now / 1200)) % 3 === 0) { ctx.font = '7px "Segoe UI Emoji", serif'; ctx.fillText('🎄', Math.round(o.x) - 4, Math.round(o.y) - 8); }
       } else if (ft.phase === 'raising' || ft.phase === 'lit') {
-        const TH = 42, TW = 26;
-        const th = ft.phase === 'lit' ? TH : Math.max(8, TH * ft.prog);
-        shadow(cx, baseY + 2, 12, 3);
-        ctx.fillStyle = '#6b4a2f'; ctx.fillRect(cx - 2, baseY - 4, 4, 5); // trunk
-        ctx.fillStyle = '#2e6b38';
-        const tiers = 5;
+        // a TRUE landmark: the great tree towers over everything but the peaks
+        const TH = 120, TW = 72;
+        const th = ft.phase === 'lit' ? TH : Math.max(14, TH * ft.prog);
+        shadow(cx, baseY + 3, 30, 7);
+        ctx.fillStyle = '#6b4a2f'; ctx.fillRect(cx - 4, baseY - 6, 8, 8); // trunk
+        ctx.fillStyle = '#5d4630'; ctx.fillRect(cx - 6, baseY + 1, 12, 2); // stand
+        const tiers = 8;
         for (let k2 = 0; k2 < tiers; k2++) { // stacked boughs, rising with progress
-          if (th < (k2 + 1) * (TH / tiers) - 4) break;
-          const wy = baseY - 4 - (k2 + 1) * (th / tiers);
-          const ww = (TW / 2) * (1 - (k2 / tiers) * 0.72);
+          if (th < (k2 + 1) * (TH / tiers) - 6) break;
+          const wy = baseY - 6 - (k2 + 1) * (th / tiers);
+          const ww = (TW / 2) * (1 - (k2 / tiers) * 0.78);
+          ctx.fillStyle = k2 % 2 ? '#2e6b38' : '#276031';
           ctx.beginPath();
-          ctx.moveTo(cx - ww, wy + th / tiers + 2); ctx.lineTo(cx, wy); ctx.lineTo(cx + ww, wy + th / tiers + 2);
+          ctx.moveTo(cx - ww, wy + th / tiers + 4); ctx.lineTo(cx, wy); ctx.lineTo(cx + ww, wy + th / tiers + 4);
           ctx.fill();
+          ctx.fillStyle = 'rgba(244,247,251,0.5)'; // snow on the bough tips
+          ctx.fillRect(cx - ww + 2, wy + th / tiers + 2, 4, 1);
+          ctx.fillRect(cx + ww - 6, wy + th / tiers + 2, 4, 1);
         }
         if (ft.phase === 'raising') {
-          ctx.fillStyle = '#8a6a3f'; // scaffold + riggers on ropes
-          ctx.fillRect(cx - 15, baseY - th - 2, 1, th + 2); ctx.fillRect(cx + 14, baseY - th - 2, 1, th + 2);
-          ctx.fillRect(cx - 15, baseY - th - 2, 30, 1);
+          ctx.fillStyle = '#8a6a3f'; // full scaffold cage + riggers
+          for (const gx of [cx - TW / 2 - 6, cx + TW / 2 + 5]) ctx.fillRect(gx, baseY - th - 4, 1, th + 4);
+          ctx.fillRect(cx - TW / 2 - 6, baseY - th - 4, TW + 12, 1);
+          ctx.fillRect(cx - TW / 2 - 6, baseY - th / 2, TW + 12, 1);
           const wf = Math.floor(now / 300) % 2;
           const w1 = SPR.person('hiker', 91);
-          ctx.drawImage(w1.f[wf], cx - 21, baseY - w1.h);
-          ctx.drawImage(w1.f[1 - wf], cx + 15, baseY - w1.h);
+          ctx.drawImage(w1.f[wf], cx - TW / 2 - 12, baseY - w1.h);
+          ctx.drawImage(w1.f[1 - wf], cx + TW / 2 + 6, baseY - w1.h);
+          ctx.drawImage(w1.f[wf], cx + 4, baseY - th / 2 - w1.h);   // one up on the mid-deck
         } else {
-          // LIT: star on top, twinkling lights, glowing all night long
-          ctx.fillStyle = '#ffd870'; ctx.fillRect(cx - 1, baseY - th - 8, 3, 3); ctx.fillRect(cx, baseY - th - 10, 1, 1);
+          // LIT: a blazing star, dozens of twinkling lights, glowing ALL night
+          ctx.fillStyle = '#ffd870';
+          ctx.fillRect(cx - 2, baseY - th - 12, 5, 5); ctx.fillRect(cx, baseY - th - 15, 1, 3);
+          ctx.fillRect(cx - 4, baseY - th - 10, 2, 1); ctx.fillRect(cx + 3, baseY - th - 10, 2, 1);
           const tcols = ['#ff6060', '#ffd160', '#60c0ff', '#80ff90', '#ff90e0', '#c0a0ff'];
-          for (let k2 = 0; k2 < 26; k2++) {
-            if ((k2 + Math.floor(now / 400)) % 3 === 0) continue; // twinkle
+          for (let k2 = 0; k2 < 64; k2++) {
+            if ((k2 + Math.floor(now / 400)) % 4 === 0) continue; // twinkle
             const ph2 = (k2 * 37 % 100) / 100;
-            const ly = baseY - 5 - ph2 * (th - 8);
-            const lw = (TW / 2) * (1 - ph2 * 0.72) - 1;
+            const ly = baseY - 8 - ph2 * (th - 12);
+            const lw = (TW / 2) * (1 - ph2 * 0.78) - 2;
             ctx.fillStyle = tcols[k2 % tcols.length];
-            ctx.fillRect(cx + Math.sin(k2 * 2.7) * lw, ly, 1.5, 1.5);
+            ctx.fillRect(cx + Math.sin(k2 * 2.7) * lw, ly, 2, 2);
           }
-          ctx.fillStyle = '#c0392b'; ctx.fillRect(cx - 9, baseY - 3, 4, 3); // gifts at the base
-          ctx.fillStyle = '#4f9ed0'; ctx.fillRect(cx + 6, baseY - 2, 3, 3);
-          UI.lights.push({ x: cx, y: baseY - th / 2, r: 38, a: 0.9, tint: 'warm' });
-          UI.lights.push({ x: cx, y: baseY - th - 8, r: 12, a: 0.9, tint: 'orange' });
+          // a light garland spiralling the whole height
+          ctx.fillStyle = '#fff2b0';
+          for (let k2 = 0; k2 < 30; k2++) {
+            const ph2 = k2 / 30;
+            const lw = (TW / 2) * (1 - ph2 * 0.78) - 1;
+            ctx.fillRect(cx + Math.sin(ph2 * 15 + now / 900) * lw, baseY - 8 - ph2 * (th - 12), 1, 1);
+          }
+          // a small mountain of gifts round the base
+          const gcols2 = ['#c0392b', '#4f9ed0', '#f2c14f', '#5fae62', '#c05fa8'];
+          for (let k2 = 0; k2 < 8; k2++) {
+            ctx.fillStyle = gcols2[k2 % 5];
+            ctx.fillRect(cx - 20 + k2 * 5, baseY - 2 - (k2 % 3), 4, 3 + (k2 % 2));
+          }
+          UI.lights.push({ x: cx, y: baseY - th / 2, r: 90, a: 0.95, tint: 'warm' });
+          UI.lights.push({ x: cx, y: baseY - th - 10, r: 22, a: 0.95, tint: 'orange' });
+          UI.lights.push({ x: cx - TW / 3, y: baseY - th / 4, r: 26, a: 0.5, tint: 'pink' });
+          UI.lights.push({ x: cx + TW / 3, y: baseY - th / 3, r: 26, a: 0.5, tint: 'green' });
           // the village celebrates under and around its tree
           const holiday = Festivals.yearDay() === 24 || Festivals.yearDay() === 25;
           if (holiday || Sim.clock >= 960 || Sim.clock < 60) {
-            const nC = holiday ? 12 : 8;
+            const nC = holiday ? 18 : 11;
             for (let k2 = 0; k2 < nC; k2++) {
               const a2 = (k2 / nC) * 6.283 + 0.4;
-              const px2 = cx + Math.cos(a2) * (17 + (k2 % 3) * 5);
-              const py2 = baseY + 4 + Math.sin(a2) * 9;
+              const px2 = cx + Math.cos(a2) * (42 + (k2 % 3) * 7);
+              const py2 = baseY + 6 + Math.sin(a2) * 13;
               const ps = SPR.person(['man', 'woman', 'kid'][k2 % 3], 401 + k2 * 13);
               ctx.drawImage(ps.f[(Math.floor(now / 800) + k2) % 2], Math.round(px2) - 3, Math.round(py2) - ps.h);
               if ((Math.floor(now / 1300) + k2) % 4 === 0) {
@@ -1072,6 +1314,21 @@ function render(now) {
     for (let k = 0; k < 5; k++) {
       const a = tn.ph * 2 + k * 1.3;
       ctx.fillRect(tn.x + Math.cos(a) * (6 + k * 3), tn.y - 8 - k * 5 + Math.sin(a) * 4, 2, 2);
+    }
+  }
+  // Santa's sleigh crossing the midnight sky, reindeer first
+  if (typeof Festivals !== 'undefined' && Festivals.sleigh) {
+    const sl = Festivals.sleigh;
+    const sy2 = sl.y + Math.sin(sl.ph) * 5 - 46; // flying high
+    ctx.globalAlpha = 0.15; ctx.fillStyle = '#0a1410';
+    ctx.beginPath(); ctx.ellipse(sl.x + 18, sl.y + 8, 14, 3, 0, 0, 7); ctx.fill(); // moon-shadow below
+    ctx.globalAlpha = 1;
+    ctx.drawImage(SPR.sleigh, Math.round(sl.x), Math.round(sy2));
+    UI.lights.push({ x: sl.x + 19, y: sy2 + 5, r: 10, a: 0.9, tint: 'red' });   // that nose
+    UI.lights.push({ x: sl.x + 29, y: sy2 + 7, r: 14, a: 0.6, tint: 'warm' });
+    if (Math.random() < 0.2) { // stardust in the wake
+      ctx.fillStyle = '#fff2b0';
+      ctx.fillRect(sl.x - 4 + Math.random() * 6, sy2 + 4 + Math.random() * 6, 1, 1);
     }
   }
 
@@ -1504,8 +1761,14 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function updateHUD() {
   const s = Sim.stats();
+  // full village date: weekday, season-day, year (28-day years, 7-day seasons)
+  const vYear = Math.floor((Sim.day - 1) / 28) + 1;
+  const seasonDay = ((Sim.day - 1) % 7) + 1;
   document.getElementById('clock').textContent =
-    `Day ${Sim.day} · ${WEEKDAYS[Sim.day % 7]} · ${Sim.timeStr()}`;
+    `Day ${Sim.day} · ${WEEKDAYS[Sim.day % 7]} ${seasonDay} ${SEASONS[Weather.season]}, Yr ${vYear} · ${Sim.timeStr()}`;
+  // Christmas month runs in real time: fast-forward stays locked all season
+  const xmasLock = typeof Festivals !== 'undefined' && Festivals.isChristmasSeason();
+  document.querySelectorAll('#speed button').forEach((b, n) => b.classList.toggle('locked', xmasLock && n >= 2));
   document.getElementById('chip-season').textContent = Weather.label();
   document.getElementById('chip-weather').textContent = Weather.weatherLabel();
   document.getElementById('stat-pop').textContent = s.pop;
@@ -1579,6 +1842,11 @@ function updateMinimap() {
 }
 
 function setSpeed(i) {
+  // Christmas is savoured, not skipped: fast-forward closes for the season
+  if (i > 1 && typeof Festivals !== 'undefined' && Festivals.isChristmasSeason()) {
+    if (UI.speedIdx !== 1) i = 1;
+    else { toast('🎄 Christmas runs at its own unhurried pace — fast-forward reopens in the new year'); i = 1; }
+  }
   UI.speedIdx = i;
   document.querySelectorAll('#speed button').forEach((b, n) => b.classList.toggle('active', n === i));
 }
@@ -1731,6 +1999,8 @@ function frame(now) {
     if (typeof Calamity !== 'undefined') Calamity.tick(dt * spd);
     if (typeof Festivals !== 'undefined') Festivals.tick(dt * spd);
   }
+  // the season can begin while fast-forwarding — rein the clock back in
+  if (typeof Festivals !== 'undefined' && Festivals.isChristmasSeason() && UI.speedIdx > 1) setSpeed(1);
   // ribbon-cuttings: construction sites that just finished
   while (Sim.completed.length) {
     const b = Sim.completed.shift();

@@ -20,7 +20,7 @@ const LEADER_TYPES = [
     kind: 'visionary', emoji: '💖', zeal: 1.35, skim: 0,
     label: 'a visionary with a pure heart',
     builds: ['park', 'school', 'library', 'playground', 'hospital', 'pool', 'grandpark', 'plaza', 'zoo',
-      'temple', 'museum', 'theater', 'cinema', 'college'],
+      'temple', 'church', 'museum', 'theater', 'cinema', 'college'],
   },
   {
     kind: 'business', emoji: '📈', zeal: 1.05, skim: 0.08,
@@ -47,7 +47,7 @@ const CIVIC_COSTS = {
   busstop: 45, taxistand: 70, trainstation: 420, dock: 340, heliport: 560,
   postoffice: 210, plaza: 170, grandpark: 320, zoo: 720, rowhouse: 300,
   courthouse: 420, powerplant: 780, deptstore: 700,
-  watertower: 240, college: 520, temple: 300, museum: 380, cinema: 400, theater: 380,
+  watertower: 240, college: 520, temple: 300, church: 320, museum: 380, cinema: 400, theater: 380,
   stadium: 950, amusement: 820, airport: 1600, tvstation: 450, exchange: 600,
   farm: 260, skyscraper: 1200, gym: 260, cafe: 160,
 };
@@ -705,6 +705,7 @@ const Gov = {
     if (pop >= 26 && !this.hasPlanned('watertower')) needs.push('watertower');
     if (pop >= 38 && !this.hasPlanned('powerplant')) needs.push('powerplant');
     // learning, faith & culture as the town matures
+    if (pop >= 22 && !this.hasPlanned('church')) needs.push('church');
     if (pop >= 35 && !this.hasPlanned('temple')) needs.push('temple');
     if (pop >= 58 && !this.hasPlanned('college')) needs.push('college');
     if (pop >= 48 && !this.hasPlanned('cinema')) needs.push('cinema');
@@ -789,7 +790,7 @@ const Gov = {
       case 'school': return 1 + Math.floor(pop / 80);
       case 'hospital': return 1 + Math.floor(pop / 150);
       case 'watertower': return 1 + Math.floor(pop / 200);
-      case 'temple': case 'cinema': case 'library': case 'postoffice': return 1 + Math.floor(pop / 160);
+      case 'temple': case 'church': case 'cinema': case 'library': case 'postoffice': return 1 + Math.floor(pop / 160);
       case 'park': return Math.max(2, Math.floor(pop / 20));
       case 'plaza': case 'playground': case 'pool': case 'gym': return 1 + Math.floor(pop / 120);
       case 'busstop': return Math.min(8, 1 + Math.floor(pop / 40));

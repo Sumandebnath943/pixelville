@@ -438,6 +438,24 @@ def('townhall', {
     p.rect((W >> 1) - 5, 0, 10, 3, '#8a9a5b');
   }
 });
+def('church', {
+  name: 'Church', emoji: '⛪', cat: 'civic', w: 3, h: 3, ex: 34, jobs: 3, hours: { s: 420, e: 1260 }, wkd: true, visit: 'leisure',
+  draw(p, W, H, ex, R) {
+    baseBld(p, W, H, ex, R, { wall: '#f2efe6', roof: '#8a5a4a', style: 'gable', door: 'arch', winW: 3, winH: 7 });
+    // steeple with a golden cross and a bell
+    p.rect((W >> 1) - 4, 6, 8, 18, '#eeeadd'); p.fr((W >> 1) - 4, 6, 8, 18, '#a8a294');
+    p.rect((W >> 1) - 5, 4, 10, 3, '#8a5a4a'); p.rect((W >> 1) - 3, 2, 6, 3, '#8a5a4a');
+    p.vl(W >> 1, 0, 3, '#c8a84f'); p.hl((W >> 1) - 1, 1, 3, '#c8a84f'); // cross
+    p.rect((W >> 1) - 2, 12, 4, 5, '#3a3430'); p.px(W >> 1, 14, '#c8a84f'); // bell in the tower
+    // rose window in stained glass
+    p.disc(W >> 1, H - 21, 4, '#5f83a4');
+    p.px(W >> 1, H - 21, '#e05a5a'); p.px((W >> 1) - 2, H - 22, '#f2c14f');
+    p.px((W >> 1) + 2, H - 20, '#8a5fc0'); p.px((W >> 1) - 1, H - 19, '#5fae62');
+    p.windows.push([(W >> 1) - 4, H - 24, 8, 7]);
+    // churchyard hedges
+    p.rect(2, H - 4, 4, 3, '#7fae5c'); p.rect(W - 6, H - 4, 4, 3, '#7fae5c');
+  }
+});
 def('temple', {
   name: 'Temple', emoji: '⛪', cat: 'civic', w: 3, h: 2, ex: 24, hours: { s: 480, e: 1200 }, wkd: true, visit: 'leisure',
   draw(p, W, H, ex, R) {
@@ -1170,7 +1188,7 @@ const SPR = {
     this.makeRoads(); this.makeBridges(); this.makeMountains(); this.makeCars();
     this.makeGlow(); this.makeLamp(); this.makePuddles(); this.makePolice();
     this.makeCritters(); this.makeUmbrellas(); this.makeDecor();
-    this.makeRails(); this.makeTransit(); this.makeCivicProps();
+    this.makeRails(); this.makeTransit(); this.makeCivicProps(); this.makeFestive();
     for (const key in CAT) {
       const d = CAT[key];
       if (!d.draw) continue;
@@ -1882,6 +1900,39 @@ const SPR = {
     this._tents.set(color, p.c);
     return p.c;
   },
+  /* ---------- festive sprites: Santa on foot & his midnight sleigh ---------- */
+  makeFestive() {
+    // Santa walking, sack over the shoulder (2 frames)
+    this.santa = [];
+    for (let f = 0; f < 2; f++) {
+      const p = new P(9, 11);
+      p.rect(2, 2, 4, 2, '#f2c9a0');                   // face
+      p.rect(2, 0, 4, 2, '#c0392b'); p.px(6, 0, '#f5f1e4'); // hat + pompom
+      p.hl(2, 4, 4, '#f5f1e4');                        // beard
+      p.rect(2, 5, 4, 3, '#c0392b');                   // coat
+      p.hl(2, 7, 4, '#26282e'); p.px(4, 7, '#c8a84f'); // belt + buckle
+      if (f === 0) { p.rect(2, 8, 2, 3, '#c0392b'); p.rect(4, 8, 2, 2, '#c0392b'); }
+      else { p.rect(2, 8, 2, 2, '#c0392b'); p.rect(4, 8, 2, 3, '#c0392b'); }
+      p.rect(6, 3, 3, 4, '#6b4a2f'); p.px(7, 2, '#5d4630'); // gift sack
+      this.santa.push(p.c);
+    }
+    // the sleigh: two reindeer, reins, sled, gifts (flying right)
+    const p = new P(36, 13);
+    p.hl(6, 7, 20, 'rgba(200,170,90,0.85)');                    // reins
+    for (const rx of [1, 11]) {                                  // reindeer
+      p.rect(rx + 1, 6, 6, 3, '#8a6a45'); p.fr(rx + 1, 6, 6, 3, '#5d4630');
+      p.rect(rx + 6, 4, 2, 3, '#8a6a45');                        // head
+      p.px(rx + 6, 3, '#5d4630'); p.px(rx + 8, 3, '#5d4630');    // antlers
+      p.px(rx + 2, 9, '#5d4630'); p.px(rx + 5, 9, '#5d4630');    // legs
+    }
+    p.px(19, 5, '#ff4040');                                      // the famous red nose (lead deer)
+    p.rect(24, 5, 11, 5, '#c0392b'); p.fr(24, 5, 11, 5, '#7e2622'); // sled
+    p.hl(23, 11, 13, '#c8a84f'); p.px(23, 10, '#c8a84f');        // runners
+    p.rect(27, 2, 3, 3, '#c0392b'); p.px(28, 1, '#f2c9a0'); p.px(29, 0, '#f5f1e4'); // Santa aboard
+    p.px(32, 3, '#4f9ed0'); p.px(33, 3, '#f2c14f'); p.px(32, 2, '#5fae62');         // gift pile
+    this.sleigh = p.c;
+  },
+
   makeCivicProps() {
     // voting booth
     let p = new P(10, 13);

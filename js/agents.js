@@ -22,7 +22,7 @@ const WAGES = { office: 22, skyscraper: 28, factory: 18, farm: 12, shop: 13, mar
   steelworks: 22, sawmill: 16, brickworks: 16, textilemill: 14, cannery: 15, glassworks: 17, warehouse: 14, powerplant: 24,
   taxistand: 13, trainstation: 16, dock: 15, heliport: 20, postoffice: 14, zoo: 14,
   casino: 16, burgerpalace: 12, goldenarches: 12, crispycluck: 12, tacobelle: 12, pizzapalace: 13,
-  carshowroom: 18, motoshowroom: 15, teastall: 8, fishmarket: 13, boatclub: 12, tvstation: 18, exchange: 26, watertower: 12 };
+  carshowroom: 18, motoshowroom: 15, teastall: 8, fishmarket: 13, boatclub: 12, tvstation: 18, exchange: 26, watertower: 12, church: 10 };
 const PRICES = { shop: 5, market: 7, mall: 10, bakery: 4, cafe: 5, restaurant: 12, cinema: 8, theater: 9, museum: 6, amusement: 13, stadium: 10, gym: 5, pool: 4, hotel: 15, library: 0, temple: 0, park: 0, playground: 0,
   deptstore: 9, pharmacy: 6, barber: 7, florist: 6, bookshop: 7, butcher: 8, tailor: 9, electronics: 14, toyshop: 8, jeweler: 20, petshop: 7, hardware: 9, furniture: 15, icecream: 4, pizzeria: 7, arcade: 6, laundry: 4, autoshop: 12,
   zoo: 9, plaza: 0, grandpark: 0,
@@ -112,7 +112,7 @@ const DEST_EMOJI = {
   furniture: '🛋️', icecream: '🍦', pizzeria: '🍕', arcade: '🕹️', laundry: '🧺', autoshop: '🔧',
   zoo: '🦁', plaza: '⛲', grandpark: '🧺',
   casino: '🎰', burgerpalace: '🍔', goldenarches: '🍟', crispycluck: '🍗', tacobelle: '🌮', pizzapalace: '🍕',
-  teastall: '☕', fishmarket: '🐟', boatclub: '🚣', carshowroom: '🚗', motoshowroom: '🏍️', exchange: '📈',
+  teastall: '☕', fishmarket: '🐟', boatclub: '🚣', carshowroom: '🚗', motoshowroom: '🏍️', exchange: '📈', church: '⛪',
 };
 
 const Sim = {
@@ -352,6 +352,12 @@ const Sim = {
       if (Math.random() < (worksToday ? 0.25 : 0.7)) {
         const shopT = worksToday ? 1120 + jit() : 560 + Math.random() * 500;
         add(shopT, this.pickVenue('shop', p), shopT + 30 + Math.random() * 35);
+      }
+      // Christmas season: the markets pull everyone in for lights & shopping
+      if (typeof Festivals !== 'undefined' && Festivals.decorated() && Festivals.markets.length && Math.random() < 0.5) {
+        const mk = Festivals.markets[(Math.random() * Festivals.markets.length) | 0];
+        const mt = 1020 + Math.random() * 300;
+        p.events.push({ t: mt, market: mk, until: mt + 60 });
       }
       // a quick tea (and for some, a smoke) at the corner stall
       if (Math.random() < 0.3) {
@@ -613,7 +619,8 @@ const Sim = {
         say(`📦 ${this.fullName(mover)} moved in with ${this.fullName(mover === p ? q : p)} — young love under one roof`);
       } else if (p.home === q.home && days >= 6 + (p.seed % 5)) {
         p.married = q.married = true;
-        const venue = World.buildings.find(b => b.type === 'temple' && b.connected && !b.ruined) ||
+        const venue = World.buildings.find(b => b.type === 'church' && b.connected && !b.ruined) ||
+                      World.buildings.find(b => b.type === 'temple' && b.connected && !b.ruined) ||
                       World.buildings.find(b => b.type === 'townhall' && b.connected && !b.ruined) ||
                       World.buildings.find(b => (b.type === 'park' || b.type === 'grandpark') && b.connected && !b.ruined);
         say(`💍 Wedding bells! ${this.fullName(p)} and ${this.fullName(q)} got married${venue ? ` at the ${CAT[venue.type].name}` : ''} 🎉`);
@@ -1270,6 +1277,7 @@ const Sim = {
         if (e) {
           p.events.splice(p.events.indexOf(e), 1);
           if (e.stroll) this.startStroll(p);
+          else if (e.market) this.startMarketTrip(p, e.market);
           else this.startTrip(p, e.dest, e.until);
         }
       } else if (p.at === p.work && p.state === 'in') {
@@ -1297,6 +1305,28 @@ const Sim = {
         p.bubbleUntil = performance.now() + 1800;
       }
       const t = p.trip;
+      // lingering somewhere lovely (a Christmas market, mostly)
+      if (t.pauseAt !== undefined && t.prog >= t.pauseAt) {
+        t.pauseT = (t.pauseT === undefined ? 20 : t.pauseT) - dt * MIN_PER_SEC;
+        if (t.pauseT > 0) return;
+        t.pauseAt = undefined;
+      }
+      // red lights and closed level-crossing gates stop the traffic
+      if (t.car || t.taxi || t.moto) {
+        const ni = Math.ceil(t.prog);
+        if (ni > t.prog && ni < t.path.length) {
+          const [nx2, ny2] = t.path[ni];
+          const [, py2] = t.path[Math.floor(t.prog)];
+          const key = World.idx(nx2, ny2);
+          if (World.signals.size && World.signals.has(key)) {
+            const nsGreen = Math.floor(Sim.clock / 2.5) % 2 === 0; // 2½-minute cycle
+            const movingNS = ny2 !== py2;
+            if (movingNS !== nsGreen) return; // red for us — wait at the line
+          }
+          if (World.crossings.size && World.crossings.has(key) &&
+              typeof Life !== 'undefined' && Life.trainNearTile(nx2, ny2, 7)) return; // gates are down
+        }
+      }
       const speed = (t.car || t.taxi) ? CAR_SPEED : t.moto ? 1.6 : WALK_SPEED;
       t.prog += speed * dt;
       if (t.prog >= t.path.length - 1) { // arrived
@@ -1424,6 +1454,25 @@ const Sim = {
       if (stop) stop.funds += 1;
     }
     const [sx, sy] = path[0];
+    p.x = sx * T + 8; p.y = sy * T + 8;
+  },
+
+  /* off to the Christmas market: walk there, browse the stalls, walk home */
+  startMarketTrip(p, mk) {
+    if (!p.home.connected) return;
+    const spot = World.nearestRoad(mk.x + 2, mk.y + 2, 7);
+    if (!spot) return;
+    const out = World.roadPath(p.at.door.x, p.at.door.y, spot.x, spot.y);
+    if (!out || out.length < 3) return;
+    p.state = 'walk';
+    p.dest = p.home;
+    p.until = null;
+    p.trip = {
+      path: out.concat([...out].reverse().slice(1)), prog: 0, car: null,
+      pauseAt: out.length - 1, pauseT: 25 + Math.random() * 30, // time among the stalls
+    };
+    p.bubble = '🎄'; p.bubbleUntil = performance.now() + 2600;
+    const [sx, sy] = p.trip.path[0];
     p.x = sx * T + 8; p.y = sy * T + 8;
   },
 
