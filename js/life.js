@@ -218,7 +218,10 @@ const Life = {
         b.fire = 1; b.fireT = 300 + Math.random() * 120;
         b.fireNoStationAnnounced = false; b.fireDispatchRetry = 0;
         this.firesRecent = (this.firesRecent || 0) + 1;
-        for (const r of b.residents) r.mood = Math.max(5, (r.mood === undefined ? 60 : r.mood) - 15); // shock
+        for (const r of b.residents) {
+          r.mood = Math.max(5, (r.mood === undefined ? 60 : r.mood) - 15); // shock
+          if (typeof Mind !== 'undefined') Mind.remember(r, 'fire', 'watched their home catch fire', -2, b.id);
+        }
         if (b.ownerId) { // the owner family takes it hard too
           const oh = World.buildings.find(o => o.id === b.ownerId);
           if (oh) for (const r of oh.residents) r.mood = Math.max(5, (r.mood === undefined ? 60 : r.mood) - 10);

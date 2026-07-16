@@ -1633,6 +1633,21 @@ function showInfo(b) {
     rows += `<div class="info-row">🚶 ${away} out right now</div>`;
     const am = b.residents.reduce((s2, r) => s2 + (r.mood === undefined ? 60 : r.mood), 0) / b.residents.length;
     rows += `<div class="info-row">${am >= 70 ? '😄' : am >= 50 ? '🙂' : am >= 35 ? '😕' : '😠'} Household mood: ${Math.round(am)}%</div>`;
+    if (typeof Mind !== 'undefined') {
+      // the inner life of the household: what they know, feel and remember
+      const story = Mind.householdStory(b);
+      if (story) rows += `<div class="info-row">🧠 ${story.who.name} remembers: ${story.memory.text} (day ${story.memory.day})</div>`;
+      const knows = b.residents.reduce((s2, r) => s2 + (r.mind ? r.mind.knows.size : 0), 0);
+      const pals = b.residents.reduce((s2, r) => s2 + Mind.friendCount(r), 0);
+      rows += `<div class="info-row">💡 Knows ${knows} places around town · ${pals} friendship${pals === 1 ? '' : 's'}</div>`;
+      const lead = b.residents.find(r => r.kind !== 'kid');
+      if (lead && lead.mind) {
+        const t = lead.mind.traits;
+        const domName = [['sociable', t.social], ['cautious', t.caution], ['ambitious', t.ambition], ['frugal', t.thrift], ['curious', t.curiosity]]
+          .sort((x, y) => y[1] - x[1])[0][0];
+        rows += `<div class="info-row">🎭 ${lead.name} is the ${domName} type</div>`;
+      }
+    }
   }
   if (b.type === 'townhall' && typeof Gov !== 'undefined' && Gov.leader) {
     const mp = Gov.leader.personId ? Sim.people.find(q => q.id === Gov.leader.personId) : null;
@@ -1753,6 +1768,8 @@ function frame(now) {
         a.bubble = b.bubble = '💬';
         a.bubbleUntil = b.bubbleUntil = now + 1900;
         a.chatCd = b.chatCd = now + 26000;
+        // a chat is never just a chat: tips, gossip and friendship pass along
+        if (typeof Mind !== 'undefined') Mind.gossip(a, b);
       }
     }
   }

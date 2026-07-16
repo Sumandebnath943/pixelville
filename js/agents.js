@@ -195,6 +195,8 @@ const Sim = {
       this.grandOpening = { b, day: this.day };
       msgs.push(`🎉 Grand opening at the ${d.name} — the whole town is talking!`);
     }
+    // word gets around: neighbours hear of the new place (PVTV tells everyone)
+    if (typeof Mind !== 'undefined') Mind.announcePlace(b);
     if (!b.connected) msgs.push(`⚠️ ${d.name} couldn't reach the road network`);
     // everyone re-plans their day around the new building
     let replanned = 0;
@@ -244,6 +246,7 @@ const Sim = {
       x: 0, y: 0,
     };
     home.residents.push(p); this.people.push(p);
+    if (typeof Mind !== 'undefined') Mind.init(p); // a personality, and an empty head to fill
     return p;
   },
 
@@ -369,7 +372,22 @@ const Sim = {
       if (Math.random() < outP) {
         const t = 1110 + Math.random() * 120;
         const gamblerNight = p.seed % 7 === 0 && Math.random() < 0.5; // some hearts race for the tables
-        add(t, this.pickVenue('leisure', p, gamblerNight ? ['casino'] : undefined), t + 55 + Math.random() * 50);
+        const venue = this.pickVenue('leisure', p, gamblerNight ? ['casino'] : undefined);
+        add(t, venue, t + 55 + Math.random() * 50);
+        // the sociable don't go alone — they call a friend to come along
+        if (venue && venue.connected && typeof Mind !== 'undefined' &&
+            Mind.ensure(p).traits.social > 0.55 && Math.random() < 0.5) {
+          const pals = Mind.friendsOf(p).filter(q =>
+            q.state === 'in' && q.at === q.home && q.kind !== 'kid' && q.heldUntil <= this.day);
+          if (pals.length) {
+            const pal = pals[(Math.random() * pals.length) | 0];
+            pal.events.push({ t: t + 3, dest: venue, until: t + 50 + Math.random() * 40 });
+            pal.events.sort((x, y) => x.t - y.t);
+            Mind.bond(p, pal, 0.08);
+            if (Math.random() < 0.05 && typeof Life !== 'undefined')
+              Life.say(`👥 ${this.fullName(p)} invited ${this.fullName(pal)} for an evening at the ${CAT[venue.type].name}`);
+          }
+        }
       }
       // a stroll around the block (often with the dog)
       if (Math.random() < 0.4) {
@@ -400,11 +418,26 @@ const Sim = {
       if (pref.length) opts = pref;
     }
     if (!opts.length) return null;
-    // weight closer venues higher
-    opts.sort((a, b) =>
-      (Math.abs(a.x - p.home.x) + Math.abs(a.y - p.home.y)) - (Math.abs(b.x - p.home.x) + Math.abs(b.y - p.home.y)));
-    const i = Math.min(opts.length - 1, Math.floor(Math.abs(Math.random() + Math.random() - 1) * opts.length));
-    return opts[i];
+    // A real DECISION, not a dice roll: each option is scored by what this
+    // person knows, remembers, likes, fears, and can afford.
+    const mind = typeof Mind !== 'undefined' ? Mind.ensure(p) : null;
+    let best = null, bs = -Infinity;
+    for (const b of opts) {
+      if (mind && Mind.fears(p, b.id)) continue; // never going back there (for a while)
+      const known = !mind || mind.knows.has(b.id);
+      if (!known && Math.random() > mind.traits.curiosity * 0.5) continue; // you can't pick what you've never heard of
+      const dist = Math.abs(b.x - p.home.x) + Math.abs(b.y - p.home.y);
+      let score = -dist * (0.8 + (mind ? mind.traits.thrift * 0.5 : 0.2)) + Math.random() * 16;
+      if (mind) {
+        score += (mind.favorites.get(b.id) || 0) * 7;              // "my usual spot"
+        if (!known) score += mind.traits.curiosity * 12;           // the thrill of somewhere new
+        score -= (PRICES[b.type] || 0) * mind.traits.thrift * 0.9; // frugal hearts read the menu prices
+        if (mind.traits.social > 0.6 && b.inside > 1) score += 5;  // the sociable go where the people are
+      }
+      if (score > bs) { bs = score; best = b; }
+    }
+    // nobody they know runs anything suitable? they ask around and settle
+    return best || opts[(Math.random() * opts.length) | 0];
   },
 
   /* ---------- tick ---------- */
@@ -467,6 +500,13 @@ const Sim = {
       if (p.ownsBusiness) target += 8;          // pride of ownership
       if (p.funDay === this.day - 1) target += 7; // yesterday's outing still glows
       if (typeof Weather !== 'undefined' && Weather.kind === 'clear') target += 3;
+      if (typeof Mind !== 'undefined') {
+        // what you carry with you: fresh memories and real friendships
+        target += Math.max(-9, Math.min(9, Mind.recentFeel(p) * 1.4));
+        const pals = Mind.friendCount(p);
+        if (pals >= 2) target += 4;
+        else if (p.kind !== 'kid' && !pals && !p.partnerId) target -= 4; // loneliness is real
+      }
       p.mood = Math.max(5, Math.min(98, p.mood + (target - p.mood) * 0.3 + (Math.random() - 0.5) * 6));
     }
   },
@@ -529,7 +569,10 @@ const Sim = {
 
     for (const p of toRemove) {
       say(`🕊️ ${this.fullName(p)} passed away peacefully at ${p.age} — the village mourns`);
-      for (const r of p.home.residents) if (r !== p) r.mood = Math.max(5, (r.mood === undefined ? 60 : r.mood) - 18);
+      for (const r of p.home.residents) if (r !== p) {
+        r.mood = Math.max(5, (r.mood === undefined ? 60 : r.mood) - 18);
+        if (typeof Mind !== 'undefined') Mind.remember(r, 'grief', `said goodbye to ${p.name}`, -2);
+      }
       this.removePerson(p);
     }
 
@@ -576,6 +619,11 @@ const Sim = {
         say(`💍 Wedding bells! ${this.fullName(p)} and ${this.fullName(q)} got married${venue ? ` at the ${CAT[venue.type].name}` : ''} 🎉`);
         p.home.funds = Math.max(0, p.home.funds - 25); // the party isn't free
         p.mood = q.mood = 95;
+        if (typeof Mind !== 'undefined') {
+          Mind.remember(p, 'love', `married ${this.fullName(q)}`, 2, venue ? venue.id : 0);
+          Mind.remember(q, 'love', `married ${this.fullName(p)}`, 2, venue ? venue.id : 0);
+          if (venue) { Mind.enjoy(p, venue, 3); Mind.enjoy(q, venue, 3); } // "our place", forever
+        }
         if (typeof Life !== 'undefined' && venue)
           Life.celebrate(venue.x * T + venue.w * 8, venue.y * T + venue.h * 16, '#f2b8cc');
         // newlyweds with savings look for a place of their own
@@ -619,7 +667,10 @@ const Sim = {
           const baby = this.makePerson('kid', p.surname, p.home, 0);
           baby.mood = 80;
           say(`👶 A baby! ${this.fullName(p)} and family welcomed little ${baby.name} ${baby.surname}`);
-          for (const r of p.home.residents) r.mood = Math.min(98, (r.mood === undefined ? 60 : r.mood) + 10);
+          for (const r of p.home.residents) {
+            r.mood = Math.min(98, (r.mood === undefined ? 60 : r.mood) + 10);
+            if (typeof Mind !== 'undefined' && r !== baby) Mind.remember(r, 'family', `welcomed little ${baby.name}`, 2);
+          }
         }
       } else if (Math.random() < 0.06) {
         p.pregnantUntil = this.day + 3;
@@ -717,6 +768,10 @@ const Sim = {
     this.tickWellbeing();
     this.tickStocks();
     this.tickPioneers();
+    if (typeof Mind !== 'undefined') {
+      Mind.tickCareers();                             // the ambitious hunt better jobs
+      for (const p of this.people) Mind.reflect(p);   // and everyone sleeps on the day
+    }
   },
 
   /* ---------- utilities: power & water bills, once a day ----------
@@ -777,9 +832,11 @@ const Sim = {
         p.lowDays = 0;
         const support = World.buildings.some(b => ['hospital', 'temple'].includes(b.type) && b.connected && !b.ruined && !b.construction);
         const partner = p.partnerId && this.people.some(q => q.id === p.partnerId);
-        if (support || partner || Math.random() < 0.45) {
+        const pals = typeof Mind !== 'undefined' && Mind.friendCount(p) > 0; // real friends notice first
+        if (support || partner || pals || Math.random() < 0.45) {
           p.mood = 58; p.funDay = this.day;
-          say(`🤝 ${this.fullName(p)} hit rock bottom — ${partner ? 'family' : support ? 'counsellors' : 'friends'} rallied around them, and there is light again`);
+          say(`🤝 ${this.fullName(p)} hit rock bottom — ${partner ? 'family' : pals ? 'their friends' : support ? 'counsellors' : 'neighbours'} rallied around them, and there is light again`);
+          if (typeof Mind !== 'undefined') Mind.remember(p, 'rescue', 'was pulled back from the edge by people who care', 2);
         } else if (Math.random() < 0.55) {
           say(`🚪 ${this.fullName(p)} quietly left the village to start over somewhere new`);
           this.removePerson(p, true);
@@ -810,14 +867,19 @@ const Sim = {
       casino.funds = Math.max(0, casino.funds - win * 0.4);
       p.mood = Math.min(98, (p.mood === undefined ? 60 : p.mood) + 15);
       say(`🎰 JACKPOT! ${this.fullName(p)} won $${Math.round(win)} at the casino!`);
+      if (typeof Mind !== 'undefined') Mind.remember(p, 'luck', 'hit the casino jackpot', 2, casino.id);
     } else if (Math.random() < 0.4) {
       p.home.funds += stake * 1.6;
       casino.funds = Math.max(0, casino.funds - stake * 0.6);
     } else {
       casino.funds += stake;
       p.mood = Math.max(5, (p.mood === undefined ? 60 : p.mood) - 3);
-      if (p.home.funds < 15 && Math.random() < 0.35)
-        say(`🎲 ${this.fullName(p)} gambled the family savings away — the ${p.surname}s are in real trouble`);
+      if (p.home.funds < 15) {
+        // a burned gambler REMEMBERS — and stays away from the tables for a while
+        if (typeof Mind !== 'undefined') Mind.remember(p, 'loss', 'gambled the family savings away', -2, casino.id);
+        if (Math.random() < 0.35)
+          say(`🎲 ${this.fullName(p)} gambled the family savings away — the ${p.surname}s are in real trouble`);
+      }
     }
   },
 
@@ -1019,6 +1081,7 @@ const Sim = {
             Life.say(`🚪 ${this.fullName(founder)}'s ${d.name} went out of business. Risk is real in PixelVille`);
           founder.ownsBusiness = false;
           founder.mood = Math.max(5, (founder.mood === undefined ? 60 : founder.mood) - 18);
+          if (typeof Mind !== 'undefined') Mind.remember(founder, 'loss', `watched the ${d.name.toLowerCase()} go under`, -2);
           World.removeBuilding(b);
           this.onBuildingRemoved(b);
           World.refreshConnections();
@@ -1030,6 +1093,7 @@ const Sim = {
           if (typeof Life !== 'undefined')
             Life.say(`📈 ${this.fullName(founder)}'s ${d.name} is booming — ${b.visitors} customers today!`);
           founder.mood = Math.min(98, (founder.mood === undefined ? 60 : founder.mood) + 8);
+          if (typeof Mind !== 'undefined') Mind.remember(founder, 'success', `the ${d.name.toLowerCase()} had its best day yet`, 2, b.id);
         }
       }
     }
@@ -1138,7 +1202,10 @@ const Sim = {
     target.alarm = true; target.alarmT = 30;
     if (typeof Life !== 'undefined') Life.dispatchTo(target.door.x, target.door.y);
     const ownerHome = target.ownerId ? World.buildings.find(o => o.id === target.ownerId) : null;
-    if (ownerHome) for (const r of ownerHome.residents) r.mood = Math.max(5, (r.mood === undefined ? 60 : r.mood) - 8);
+    if (ownerHome) for (const r of ownerHome.residents) {
+      r.mood = Math.max(5, (r.mood === undefined ? 60 : r.mood) - 8);
+      if (typeof Mind !== 'undefined') Mind.remember(r, 'crime', `the family ${CAT[target.type].name.toLowerCase()} was robbed`, -2, target.id);
+    }
 
     const policePresent = World.buildings.some(b => b.type === 'police' && b.connected && !b.construction && !b.ruined);
     const caught = Math.random() < (policePresent ? 0.7 : 0.24);
@@ -1243,6 +1310,11 @@ const Sim = {
           const cd = CAT[dest.type];
           if (cd.visit) {
             dest.visitors++;
+            if (typeof Mind !== 'undefined') { // the place is now KNOWN — and maybe loved
+              Mind.learnPlace(p, dest);
+              if (cd.visit === 'leisure') Mind.enjoy(p, dest, 0.7 + ((p.mood || 60) > 70 ? 0.5 : 0));
+              else Mind.enjoy(p, dest, 0.25);
+            }
             if (cd.visit === 'leisure') { // fun genuinely lifts the spirit
               p.mood = Math.min(98, (p.mood === undefined ? 60 : p.mood) + 4);
               p.funDay = this.day;
@@ -1272,6 +1344,7 @@ const Sim = {
               if (typeof Life !== 'undefined')
                 Life.say(`🎖️ ${this.fullName(p)} earned ${rank} at the ${CAT[dest.type].name}!`);
               p.mood = Math.min(98, (p.mood === undefined ? 60 : p.mood) + 8);
+              if (typeof Mind !== 'undefined') Mind.remember(p, 'career', `earned ${rank}`, 1, dest.id);
             }
           }
         } else {
