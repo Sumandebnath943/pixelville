@@ -207,13 +207,47 @@ const Sim = {
   },
 
   onBuildingRemoved(b) {
-    // residents vanish, workers/students lose their assignment
+    // a lost home is a story, not a deletion: families seek shelter in vacant
+    // homes (surname group by group); only those with nowhere to go leave town
+    const displaced = this.people.filter(p => p.home === b);
+    if (displaced.length) {
+      const groups = new Map();
+      for (const p of displaced) {
+        if (!groups.has(p.surname)) groups.set(p.surname, []);
+        groups.get(p.surname).push(p);
+      }
+      for (const [surname, fam] of groups) {
+        const shelter = World.buildings.find(o => o !== b && CAT[o.type].res && !o.ruined &&
+          !o.construction && o.connected && o.residents.length === 0);
+        for (const p of fam) { // whatever happens, wheels come home first
+          if (p.trip && p.trip.car) p.trip.car.free = true;
+          if (p.carHeld) { p.carHeld.free = true; p.carHeld = null; }
+          if (p.at && p.at !== b && p.at !== p.home && p.state === 'in') p.at.inside = Math.max(0, p.at.inside - 1);
+        }
+        if (shelter) {
+          for (const p of fam) {
+            this.moveHomes(p, shelter);
+            p.state = 'in'; p.at = shelter; p.trip = null; p.dest = null; p.events = []; p.returnAt = undefined;
+            p.mood = Math.max(5, (p.mood === undefined ? 60 : p.mood) - 14);
+            if (typeof Mind !== 'undefined') Mind.remember(p, 'loss', 'lost the family home', -2, b.id);
+          }
+          shelter.funds = Math.max(shelter.funds, 25);
+          if (typeof Life !== 'undefined') Life.say(`🏠 The ${surname} family found a new roof after losing their home`);
+          for (const p of fam) this.planDay(p);
+        } else {
+          if (typeof Life !== 'undefined') Life.say(`😢 With nowhere to go, the ${surname} family left the village after losing their home`);
+          for (const p of fam) this.removePerson(p, true);
+        }
+      }
+    }
     this.people = this.people.filter(p => p.home !== b);
     for (const p of this.people) {
       if (p.work === b) p.work = null;
       if (p.school === b) p.school = null;
       if (p.dest === b || p.at === b) { // stranded mid-trip or inside: send home instantly
-        p.state = 'in'; p.at = p.home; p.trip = null; p.events = [];
+        if (p.trip && p.trip.car) p.trip.car.free = true;      // the family car is not lost with the venue
+        if (p.carHeld) { p.carHeld.free = true; p.carHeld = null; }
+        p.state = 'in'; p.at = p.home; p.trip = null; p.dest = null; p.events = [];
         this.planDay(p);
       }
     }
@@ -453,7 +487,10 @@ const Sim = {
       this.clock -= 1440;
       this.day++;
       this.safety = Math.min(100, this.safety + 1.5); // town heals over time
-      for (const b of World.buildings) { b.visitors = 0; b.inside = Math.max(0, Math.min(b.inside, 3)); }
+      // remember yesterday's footfall BEFORE resetting — the daily business
+      // health check reads it (reading the live counter after this reset made
+      // every business look deserted)
+      for (const b of World.buildings) { b.lastVisitors = b.visitors; b.visitors = 0; b.inside = Math.max(0, Math.min(b.inside, 3)); }
       this.lifeCycle(); // birthdays, love, weddings, births, old age
       for (const p of this.people) if (p.state === 'in' && p.at === p.home) this.planDay(p);
       this.dailyEconomy();
@@ -525,6 +562,7 @@ const Sim = {
     p.home.residents = p.home.residents.filter(r => r !== p);
     if (p.work) p.work.workers = p.work.workers.filter(w => w !== p);
     if (p.trip && p.trip.car) p.trip.car.free = true;
+    if (p.carHeld) { p.carHeld.free = true; p.carHeld = null; } // a car parked at a venue comes home too
     if (p.at && p.at !== p.home && p.state === 'in') p.at.inside = Math.max(0, p.at.inside - 1);
     const partner = p.partnerId ? this.people.find(q => q.id === p.partnerId) : null;
     if (partner) {
@@ -1078,7 +1116,9 @@ const Sim = {
       if (!d.visit) continue;
       const founder = this.people.find(p => p.id === b.founderId);
       if (!founder) { b.founderId = null; continue; }
-      if (b.visitors <= 1) {
+      // judge on YESTERDAY'S completed footfall, not the just-reset counter
+      const footfall = b.lastVisitors === undefined ? b.visitors : b.lastVisitors;
+      if (footfall <= 1) {
         b.badDays = (b.badDays || 0) + 1;
         b.funds = Math.max(0, b.funds - 5); // rent and stock still cost money
         if (b.badDays === 5 && typeof Life !== 'undefined')
@@ -1095,10 +1135,10 @@ const Sim = {
         }
       } else {
         b.badDays = 0;
-        if (b.visitors >= 8 && !b.boomSaid) {
+        if (footfall >= 8 && !b.boomSaid) {
           b.boomSaid = true;
           if (typeof Life !== 'undefined')
-            Life.say(`📈 ${this.fullName(founder)}'s ${d.name} is booming — ${b.visitors} customers today!`);
+            Life.say(`📈 ${this.fullName(founder)}'s ${d.name} is booming — ${footfall} customers today!`);
           founder.mood = Math.min(98, (founder.mood === undefined ? 60 : founder.mood) + 8);
           if (typeof Mind !== 'undefined') Mind.remember(founder, 'success', `the ${d.name.toLowerCase()} had its best day yet`, 2, b.id);
         }
@@ -1400,8 +1440,18 @@ const Sim = {
     if (!dest || !p.home.connected || !dest.connected || dest.construction || dest.ruined) { p.returnAt = undefined; return; }
     const path = World.roadPath(p.at.door.x, p.at.door.y, dest.door.x, dest.door.y);
     if (!path || path.length < 2) {
-      // unreachable: if going out, skip; if going home, teleport
-      if (dest === p.home) { p.state = 'in'; p.at = p.home; p.returnAt = undefined; }
+      // unreachable: if going out, skip; if going home, teleport — but check
+      // out of the venue properly so head-counts and the family car survive
+      if (dest === p.home) {
+        if (p.at !== p.home) {
+          p.at.inside = Math.max(0, p.at.inside - 1);
+          if (p.carHeld) {
+            p.at.parked = Math.max(0, p.at.parked - 1);
+            p.carHeld.free = true; p.carHeld = null;
+          }
+        }
+        p.state = 'in'; p.at = p.home; p.returnAt = undefined;
+      }
       return;
     }
     if (p.at !== p.home && p.at !== dest) { // leaving a venue/workplace

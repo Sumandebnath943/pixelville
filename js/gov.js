@@ -527,9 +527,12 @@ const Gov = {
     // an emergency (fire, crime wave) forces an emergency session; otherwise
     // how often the mayor acts depends on their personality
     const urgentNow = this.assessNeedsList().some(n => n === 'fire' || n === 'police');
-    // once the town is big enough for a railway, the treasury saves up for it
+    // once the town is big enough for a railway the treasury REALLY saves for
+    // it: only emergencies may spend until the programme is funded (the old
+    // leaky 65% gate meant the railway never happened — pop 235, zero rail)
     const savingForRail = Sim.people.length >= 45 && this.countOf('trainstation') === 0 && this.treasury < 1300;
-    if (Math.random() < (urgentNow ? 0.85 : 0.36 * L.type.zeal) && !(savingForRail && !urgentNow && Math.random() < 0.65))
+    if (savingForRail && !urgentNow) { /* every coin goes to the rail fund */ }
+    else if (Math.random() < (urgentNow ? 0.85 : 0.36 * L.type.zeal))
       this.spend();
     this.planRailways();
     this.consolidateServices();
@@ -806,7 +809,7 @@ const Gov = {
      service closes the surplus, one review per day, and recovers funds */
   consolidateServices() {
     for (const key of ['police', 'fire', 'school', 'hospital', 'watertower']) {
-      const cap = this.civicCap(key) + 1;
+      const cap = this.civicCap(key); // at the cap is fine; over it is not
       const list = World.buildings.filter(b => b.type === key && !b.ruined);
       if (list.length <= cap) continue;
       const surplus = list.sort((a, b) => b.id - a.id)[0]; // the newest closes first
@@ -876,12 +879,15 @@ const Gov = {
       if (this.needTimers[need] === 2 && typeof Tasks !== 'undefined')
         Tasks.add('need-' + need, '🏛️', `The village needs a ${CAT[need].name.toLowerCase()}`);
     }
-    // one community project a day, most pressing ripe need first — emergencies
-    // (fires, crime waves) exhaust patience with town hall fastest
-    for (const need of needs) {
-      const urgent = need === 'fire' || need === 'police';
-      if ((this.needTimers[need] || 0) < (urgent ? 2 : 3)) continue;
-      if (this.communityBuild(need, urgent)) return true;
+    // one community project a day. Emergencies first, then the need that has
+    // WAITED LONGEST — list order used to let repeatable needs (parks, farms,
+    // housing) starve churches, cinemas and colleges forever
+    const isUrgent = n => n === 'fire' || n === 'police';
+    const ripe = needs.filter(n => (this.needTimers[n] || 0) >= (isUrgent(n) ? 2 : 3));
+    ripe.sort((a, b) => ((isUrgent(b) ? 1 : 0) - (isUrgent(a) ? 1 : 0)) ||
+      (this.needTimers[b] || 0) - (this.needTimers[a] || 0));
+    for (const need of ripe) {
+      if (this.communityBuild(need, isUrgent(need))) return true;
     }
     return false;
   },
@@ -905,6 +911,10 @@ const Gov = {
       if (due <= 0) break;
     }
     World.refreshConnections();
+    // close the task book entry NOW — the timers reset below, so the timer-gated
+    // check in communityTick can never fire for a need the community just met
+    if (typeof Tasks !== 'undefined')
+      Tasks.done('need-' + need, true, `Village need met: villagers built the ${CAT[need].name} themselves`);
     this.needTimers[need] = 0;
     this.unmetNeeds[need] = 0;
     if (this.leader && need !== 'townhall') this.approval = Math.max(5, this.approval - 6); // public embarrassment has a cost

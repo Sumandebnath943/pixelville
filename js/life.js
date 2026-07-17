@@ -306,7 +306,9 @@ const Life = {
     if (this.busT <= 0) {
       this.busT = 90;
       const stops = this.activeOf('busstop');
-      const sig = stops.map(s => s.id).join(',');
+      // the road stamp keeps the route honest: bulldozed streets re-route the
+      // line instead of buses driving over the grass where a road used to be
+      const sig = stops.map(s => s.id).join(',') + '|' + World.roadStamp;
       if (sig !== this.busSig) {
         this.busSig = sig;
         this.buses = [];
@@ -469,6 +471,7 @@ const Life = {
                 const names = { local: 'the all-stops local', commuter: 'a rush-hour commuter', express: 'an express', nightliner: 'the night sleeper', freight: 'a freight run' };
                 this.say(`🚂 All aboard! The railway serves ${served} station${served > 1 ? 's' : ''} with ${this.trains.map(t2 => names[t2.type]).join(', ')}.`);
               }
+              if (typeof Tasks !== 'undefined') Tasks.done('railway1', true, 'The first railway line is open — trains are running');
             }
           } else if (railless) {
             this.say('🛤️ A train station has no track touching it — drag the railway right up to the station walls.');
@@ -537,7 +540,7 @@ const Life = {
     }
     // a ferry shuttles between two docks joined by open water
     if (docks.length >= 2) {
-      const sig = docks.map(d => d.id).join(',');
+      const sig = docks.map(d => d.id).join(',') + '|' + World.waterStamp;
       if (sig !== this.ferrySig) {
         this.ferrySig = sig;
         this.ferry = null;
@@ -701,7 +704,10 @@ const Life = {
       if (Sim.day < trial.day) continue;
       trial.done = true;
       const p = Sim.people.find(q => q.id === trial.pid);
-      const guilty = Math.random() < 0.75;
+      // conviction follows the evidence: a police force that worked the case
+      // makes the charge stick far more often
+      const policeWorked = World.buildings.some(q => q.type === 'police' && q.connected && !q.construction && !q.ruined);
+      const guilty = Math.random() < (policeWorked ? 0.85 : 0.55);
       if (!guilty) {
         this.say(`⚖️ The court found ${trial.name} NOT GUILTY of ${trial.charge} — released for lack of proof.`);
         if (p) { p.heldUntil = 0; p.mood = Math.min(98, (p.mood || 60) + 5); }
@@ -927,12 +933,18 @@ const Life = {
       return;
     }
     if (typeof Gov === 'undefined' || !Gov.leader || Gov.riotCd > 0) return;
+    // the grievance survey is O(people × buildings) — take it every ~25
+    // game-minutes, not every frame, and roll the odds for the whole gap
+    this.riotEvalT = (this.riotEvalT || 0) - gm;
+    if (this.riotEvalT > 0) return;
+    const evalGap = 25;
+    this.riotEvalT = evalGap;
     const s = Sim.stats();
     const grievance = Gov.grievanceReport();
     // Protests grow from specific, visible failures (unsafe streets, missing
     // emergency cover, unemployment or corruption), rather than appearing
     // just because a random approval number happened to be low.
-    const riotChance = gm * 0.00045 * (grievance.severity / 100);
+    const riotChance = evalGap * 0.00045 * (grievance.severity / 100);
     if (Gov.approval < 45 && grievance.severity >= 42 && s.pop >= 10 && Math.random() < riotChance) {
       const hall = World.buildings.find(b => b.type === 'townhall' && !b.ruined) ||
                    World.buildings.find(b => !b.ruined && b.connected);
@@ -1076,7 +1088,10 @@ const Life = {
       const cars = Sim.travelers().filter(p => p.trip.car);
       for (let i = 0; i < cars.length && !this.crash; i++) for (let j = i + 1; j < cars.length; j++) {
         const a = cars[i], b = cars[j];
-        if (Math.abs(a.x - b.x) + Math.abs(a.y - b.y) < 20) {
+        // a crash needs CROSSING paths — two cars cruising the same way in
+        // the same lane are just traffic
+        if (Math.abs(a.x - b.x) + Math.abs(a.y - b.y) < 20 &&
+            (a.dirx !== b.dirx || a.diry !== b.diry)) {
           this.crash = {
             x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, t: 30, t0: 30,
             s1: a.trip.car.seed, s2: b.trip.car.seed,
@@ -1133,7 +1148,8 @@ const Life = {
     if (this.ufoCd > 0) this.ufoCd -= dtSim * MIN_PER_SEC;
     if (!this.ufo && night && this.ufoCd <= 0 && Math.random() < dtSim * 0.0022) {
       let x = Math.random() * GW * T, y = Math.random() * GH * T * 0.5;
-      if (World.mountains.length) { const m = World.mountains[(Math.random() * World.mountains.length) | 0]; x = m.x * T + 40; y = m.y * T - 40; }
+      // the mountains draw it sometimes — but never predictably
+      if (World.mountains.length && Math.random() < 0.5) { const m = World.mountains[(Math.random() * World.mountains.length) | 0]; x = m.x * T + 40; y = m.y * T - 40; }
       this.ufo = { x, y, t: 13, ph: 0 };
       this.say('👽 Strange lights reported in the night sky…');
     }
@@ -1468,7 +1484,10 @@ const Life = {
     } else if (!vanished) {
       this.crimes++;
       Sim.safety = Math.max(20, Sim.safety - 9);
-      this.say(`💰 The burglar got away with the loot from the ${CAT[c.target.type].name}…`);
+      // the loot is REAL money now — it leaves the till (or the family savings)
+      const loot = Math.min(Math.floor(c.target.funds || 0), 25 + ((Math.random() * 55) | 0));
+      if (loot > 0) c.target.funds -= loot;
+      this.say(`💰 The burglar got away with ${loot > 0 ? '$' + loot + ' in loot' : 'the loot'} from the ${CAT[c.target.type].name}…`);
     } else {
       this.crimes++;
       Sim.safety = Math.max(20, Sim.safety - 5);

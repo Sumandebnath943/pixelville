@@ -20,6 +20,8 @@ const World = {
   nextId: 1,
   dirty: true,                         // ground layer needs re-render
   railStamp: 0,                        // bumped on every rail edit (train line re-check)
+  roadStamp: 0,                        // bumped on every road edit (bus routes re-check)
+  waterStamp: 0,                       // bumped on water edits (ferry route re-check)
   signals: new Set(),                  // road-junction tiles governed by traffic lights
   crossings: new Set(),                // rail-over-road tiles with level-crossing gates
   onChange: null,                      // callback
@@ -473,6 +475,11 @@ const World = {
   removeBuilding(b) {
     const bi = this.buildings.indexOf(b);
     if (bi < 0) return;
+    // close any journal entries tied to this building so they can't dangle
+    if (typeof Tasks !== 'undefined') {
+      if (b.construction > 0) Tasks.done('b' + b.id, false, `${CAT[b.type].name} construction cancelled`);
+      if (b.fire) Tasks.done('fire' + b.id, false, `The burning ${CAT[b.type].name} was demolished`);
+    }
     this.buildings.splice(bi, 1);
     // rebuild bmap indices
     this.bmap.fill(0);
@@ -591,6 +598,7 @@ const World = {
     if (!this.inB(x, y)) return;
     const i = this.idx(x, y);
     if (this.bmap[i] || this.ground[i] === G_ROCK) return;
+    if (!this.roadMap[i]) this.roadStamp++;
     this.roadMap[i] = 1; this.tree[i] = 0;
     this.dirty = true;
   },
@@ -610,9 +618,17 @@ const World = {
     for (let y = y0; y !== y1 + sy; y += sy) if (this.enterCost(x1, y) !== Infinity) this.setRoadWide(x1, y, false);
   },
 
-  /* after road edits, re-check which buildings' doors touch roads */
+  /* after road edits, re-check which buildings' doors touch roads — and say
+     so out loud when occupied buildings just LOST their access */
   refreshConnections() {
-    for (const b of this.buildings) b.connected = this.isRoad(b.door.x, b.door.y);
+    let lost = 0;
+    for (const b of this.buildings) {
+      const now = this.isRoad(b.door.x, b.door.y);
+      if (b.connected && !now && !b.ruined && !b.construction) lost++;
+      b.connected = now;
+    }
+    if (lost && typeof Life !== 'undefined' && Life.onEvent)
+      Life.say(`⚠️ ${lost} building${lost > 1 ? 's' : ''} lost road access — look for the red markers`);
   },
 
   bulldoze(x, y) {
@@ -621,9 +637,9 @@ const World = {
     if (b) { this.removeBuilding(b); return { kind: 'building', b }; }
     const i = this.idx(x, y);
     if (this.railMap[i]) { this.railMap[i] = 0; this.railStamp++; this.dirty = true; return { kind: 'rail' }; }
-    if (this.roadMap[i]) { this.roadMap[i] = 0; this.dirty = true; this.refreshConnections(); return { kind: 'road' }; }
+    if (this.roadMap[i]) { this.roadMap[i] = 0; this.roadStamp++; this.dirty = true; this.refreshConnections(); return { kind: 'road' }; }
     if (this.tree[i]) { this.tree[i] = 0; this.dirty = true; return { kind: 'tree' }; }
-    if (this.ground[i] === G_WATER) { this.ground[i] = G_GRASS; this.dirty = true; return { kind: 'water' }; }
+    if (this.ground[i] === G_WATER) { this.ground[i] = G_GRASS; this.waterStamp++; this.dirty = true; return { kind: 'water' }; }
     if (this.ground[i] === G_ROCK) {
       // remove the whole mountain containing this tile
       const m = this.mountains.find(m => x >= m.x && x < m.x + MSIZE && y >= m.y && y < m.y + MSIZE);
