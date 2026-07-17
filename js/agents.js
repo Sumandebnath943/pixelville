@@ -130,6 +130,7 @@ const Sim = {
     this.safety = 92; this.grandOpening = null; this.completed = [];
     this.growthT = 0; this.nextGrowthDay = 0; this.nextEnterpriseDay = 0;
     this.stocks = null; this.nextPioneerDay = 0; this.carePulse = 0;
+    this.history = []; this.tierReached = 0; this.scenario = null;
   },
 
   hour() { return Math.floor(this.clock / 60); },
@@ -1556,6 +1557,61 @@ const Sim = {
     p.bubbleUntil = performance.now() + 2600;
     const [sx, sy] = p.trip.path[0];
     p.x = sx * T + 8; p.y = sy * T + 8;
+  },
+
+  /* ---------- save / load: the people themselves ----------
+     Everything persistent about a villager travels with the save: identity,
+     family ties, career, savings, mood, record — and their entire mind.
+     Transient state (trips, today's plans) resets to "at home, replanning". */
+  serializePeople() {
+    return this.people.map(p => ({
+      id: p.id, k: p.kind, sn: p.surname, n: p.name, s: p.seed, a: p.age,
+      h: p.home ? p.home.id : 0, w: p.work ? p.work.id : 0, sc: p.school ? p.school.id : 0,
+      pt: p.partnerId || 0, md: p.married ? 1 : 0, ds: p.datingSince || 0,
+      ls: p.lifestyle, asp: p.aspiration, fp: p.fundingPlan, sr: p.savingsRate,
+      bk: p.businessKind || 0, sv: Math.round((p.savings || 0) * 10) / 10,
+      wm: p.wageMult || 1, jd: p.jobDays || 0, hu: p.heldUntil || 0,
+      mo: Math.round(p.mood === undefined ? 60 : p.mood), ob: p.ownsBusiness ? 1 : 0,
+      ln: p.loan || 0, pf: p.portfolio || 0, pg: p.pregnantUntil || 0,
+      mind: (typeof Mind !== 'undefined' && p.mind) ? Mind.pack(p) : 0,
+    }));
+  },
+  restorePeople(arr, nextPid) {
+    this.people = [];
+    const byId = new Map(World.buildings.map(b => [b.id, b]));
+    for (const s of arr) {
+      const home = byId.get(s.h);
+      if (!home || !CAT[home.type].res) continue; // home didn't survive the load
+      const p = {
+        id: s.id, kind: s.k, surname: s.sn, seed: s.s, name: s.n, age: s.a,
+        home, work: null, school: null,
+        partnerId: s.pt || null, married: !!s.md, datingSince: s.ds || undefined,
+        state: 'in', at: home, dest: null, trip: null, events: [],
+        trait: s.asp === 'business' ? 'entrepreneur' : 'worker',
+        lifestyle: s.ls, aspiration: s.asp, fundingPlan: s.fp, savingsRate: s.sr,
+        businessKind: s.bk || null, savings: s.sv || 0,
+        wageMult: s.wm || 1, jobDays: s.jd || 0,
+        heldUntil: s.hu || 0, lastIllegalDay: -99,
+        mood: s.mo === undefined ? 60 : s.mo, ownsBusiness: !!s.ob,
+        loan: s.ln || null, portfolio: s.pf || undefined, pregnantUntil: s.pg || 0,
+        x: 0, y: 0,
+      };
+      home.residents.push(p);
+      const work = byId.get(s.w);
+      if (work && (CAT[work.type].jobs || 0) > 0) { p.work = work; work.workers.push(p); }
+      const school = byId.get(s.sc);
+      if (school && CAT[school.type].school) p.school = school;
+      if (typeof Mind !== 'undefined') {
+        if (s.mind) Mind.unpack(p, s.mind); else Mind.init(p);
+      }
+      this.people.push(p);
+    }
+    this.nextPid = Math.max(nextPid || 1, this.people.reduce((m, p) => Math.max(m, p.id + 1), 1));
+    // widowed by the load (partner's home didn't make it): clear dangling links
+    const ids = new Set(this.people.map(p => p.id));
+    for (const p of this.people) if (p.partnerId && !ids.has(p.partnerId)) p.partnerId = null;
+    this.assignJobs(); this.assignSchools();
+    for (const p of this.people) this.planDay(p);
   },
 
   /* ---------- stats ---------- */

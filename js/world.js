@@ -767,16 +767,23 @@ const World = {
     return m;
   },
 
-  /* ---------- save / load ---------- */
+  /* ---------- save / load ----------
+     v4 keeps building IDs stable across save/load, so people, minds and
+     ownership records can point at buildings and survive the round-trip. */
   serialize(extra) {
     const b64 = arr => btoa(String.fromCharCode.apply(null, arr));
     return JSON.stringify({
-      v: 3, gw: GW,
+      v: 4, gw: GW, name: this.name,
       ground: b64(this.ground), tree: b64(this.tree), road: b64(this.roadMap), rail: b64(this.railMap),
       mountains: this.mountains,
+      nextId: this.nextId,
       buildings: this.buildings.map(b => ({
-        t: b.type, x: b.x, y: b.y, variant: b.variant,
+        id: b.id, t: b.type, x: b.x, y: b.y, variant: b.variant,
         level: b.level, funds: Math.round(b.funds), ruined: b.ruined ? 1 : 0, con: Math.round(b.construction),
+        up: Math.round(b.upgrading || 0), ren: Math.round(b.renovating || 0),
+        own: b.ownerId || 0, fdr: b.founderId || 0, lp: b.landPrice || 0,
+        cars: b.cars.map(c => c.seed), bikes: b.bikes || 0, boat: b.boat ? 1 : 0,
+        bad: b.badDays || 0,
       })),
       extra: extra || {},
     });
@@ -786,9 +793,11 @@ const World = {
     if ((o.gw || 96) !== GW) return { _incompat: true }; // save from an older, smaller map
     const un = (s, arr) => { const d = atob(s); for (let i = 0; i < d.length; i++) arr[i] = d.charCodeAt(i); };
     this.reset();
+    this.name = o.name || 'PixelVille';
     un(o.ground, this.ground); un(o.tree, this.tree); un(o.road, this.roadMap);
     if (o.rail) un(o.rail, this.railMap);
     this.mountains = o.mountains || [];
+    const v4 = (o.v || 3) >= 4;
     for (const bs of o.buildings) {
       const d = CAT[bs.t];
       if (!d) continue;
@@ -802,20 +811,25 @@ const World = {
       }
       if (!clear) continue;
       const b = {
-        id: this.nextId++, type: bs.t, x: bs.x, y: bs.y, w: d.w, h: d.h,
+        id: v4 && bs.id ? bs.id : this.nextId++, type: bs.t, x: bs.x, y: bs.y, w: d.w, h: d.h,
         variant: bs.variant || 0,
         door: { x: bs.x + (d.w >> 1), y: bs.y + d.h },
         connected: false, visitors: 0, inside: 0, parked: 0,
-        residents: [], workers: [], jobs: d.jobs || 0, cars: [],
+        residents: [], workers: [], jobs: d.jobs || 0, cars: (bs.cars || []).map(s => ({ free: true, seed: s })),
         level: bs.level || 1, funds: bs.funds || 0, ruined: !!bs.ruined, fire: 0,
-        construction: bs.con || 0, upgrading: 0, renovating: 0,
+        construction: bs.con || 0, upgrading: bs.up || 0, renovating: bs.ren || 0,
+        ownerId: bs.own || null, founderId: bs.fdr || null, landPrice: bs.lp || 0,
+        bikes: bs.bikes || 0, boat: !!bs.boat, badDays: bs.bad || 0,
       };
       this.buildings.push(b);
       for (let j = 0; j < d.h; j++) for (let i = 0; i < d.w; i++)
         this.bmap[this.idx(bs.x + i, bs.y + j)] = this.buildings.length;
     }
+    if (v4) this.nextId = Math.max(o.nextId || 1, this.buildings.reduce((m, b) => Math.max(m, b.id + 1), 1));
     this.refreshConnections();
     this.dirty = true;
-    return o.extra || {};
+    const extra = o.extra || {};
+    extra._v = o.v || 3;
+    return extra;
   },
 };

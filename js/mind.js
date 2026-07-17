@@ -167,6 +167,29 @@ const Mind = {
     }
   },
 
+  /* ---------- save / load: a mind travels with its owner ---------- */
+  pack(p) {
+    const m = this.ensure(p);
+    return {
+      t: m.traits,
+      k: [...m.knows],
+      f: [...m.friends],
+      v: [...m.favorites],
+      m: m.memories,
+      g: m.flags,
+    };
+  },
+  unpack(p, s) {
+    p.mind = {
+      knows: new Set(s.k || []),
+      memories: s.m || [],
+      friends: new Map(s.f || []),
+      favorites: new Map(s.v || []),
+      flags: s.g || {},
+      traits: s.t || { social: 0.5, caution: 0.5, ambition: 0.5, thrift: 0.5, curiosity: 0.5 },
+    };
+  },
+
   /* the single most vivid recent memory in a household — for the inspector */
   householdStory(b) {
     let latest = null, who = null;

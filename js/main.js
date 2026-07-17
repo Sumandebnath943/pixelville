@@ -2004,21 +2004,40 @@ function showInfo(b) {
 }
 function hideInfo() { document.getElementById('info').style.display = 'none'; UI.selected = null; }
 
-/* =============== save / load =============== */
-function saveGame() {
-  try {
-    localStorage.setItem('pixelville', World.serialize({
-      clock: Sim.clock, day: Sim.day, safety: Sim.safety, arrests: Life.arrests, crimes: Life.crimes,
-      gov: typeof Gov !== 'undefined' ? Gov.serialize() : null,
-    }));
-    toast('Village saved 💾');
-  } catch (e) { toast('Save failed: ' + e.message); }
+/* =============== save / load ===============
+   v4: three named slots + a rolling autosave + export/import to file.
+   People, minds, ownership and the journal all travel with the save;
+   a failed load rolls back to the running village untouched. */
+const SAVE_SLOTS = ['pixelville-slot1', 'pixelville-slot2', 'pixelville-slot3'];
+const AUTOSAVE_KEY = 'pixelville-auto';
+
+function buildSaveString() {
+  return World.serialize({
+    clock: Sim.clock, day: Sim.day, safety: Sim.safety,
+    arrests: Life.arrests, crimes: Life.crimes,
+    firesRecent: Life.firesRecent || 0, graveCases: Life.graveCases || 0,
+    gov: typeof Gov !== 'undefined' ? Gov.serialize() : null,
+    people: Sim.serializePeople(),
+    nextPid: Sim.nextPid,
+    stocks: Sim.stocks || null,
+    drought: typeof Calamity !== 'undefined' ? Math.round(Calamity.droughtLevel * 100) / 100 : 0,
+    tasks: typeof Tasks !== 'undefined' ? { items: Tasks.items.slice(-120), news: Tasks.news.slice(-250) } : null,
+    history: Sim.history || [],
+    tier: Sim.tierReached || 0,
+    scenario: Sim.scenario || null,
+    meta: { name: World.name, day: Sim.day, pop: Sim.people.length, at: Date.now() },
+  });
 }
-function loadGame() {
-  const data = localStorage.getItem('pixelville');
-  if (!data) { toast('No saved village yet'); return; }
-  const extra = World.deserialize(data);
-  if (extra._incompat) { toast('⚠️ That save is from the older, smaller map and can\'t be loaded here'); return; }
+
+function writeSave(key, silent) {
+  try {
+    localStorage.setItem(key, buildSaveString());
+    if (!silent) toast('Village saved 💾');
+    return true;
+  } catch (e) { if (!silent) toast('Save failed: ' + e.message); return false; }
+}
+
+function applyLoadedState(extra) {
   Sim.reset(); Life.reset();
   if (typeof Gov !== 'undefined') Gov.reset();
   if (typeof Calamity !== 'undefined') Calamity.reset();
@@ -2026,19 +2045,114 @@ function loadGame() {
   Sim.clock = extra.clock || 420; Sim.day = extra.day || 1;
   Sim.safety = extra.safety || 92;
   Life.arrests = extra.arrests || 0; Life.crimes = extra.crimes || 0;
-  for (const b of World.buildings) {
-    if (b.construction > 0 || b.ruined) continue; // finish building / stay rubble
-    const funds = b.funds;
-    Sim.onBuildingAdded(b);
-    b.funds = funds; // keep saved savings
+  Life.firesRecent = extra.firesRecent || 0; Life.graveCases = extra.graveCases || 0;
+  if (typeof Calamity !== 'undefined' && extra.drought) Calamity.droughtLevel = extra.drought;
+  Weather.init();
+  if (extra._v >= 4 && extra.people) {
+    Sim.restorePeople(extra.people, extra.nextPid);
+    Sim.stocks = extra.stocks || null;
+    Sim.history = extra.history || [];
+    Sim.tierReached = extra.tier || 0;
+    Sim.scenario = extra.scenario || null;
+    if (typeof Tasks !== 'undefined' && extra.tasks) {
+      Tasks.items = extra.tasks.items || [];
+      Tasks.news = extra.tasks.news || [];
+      Tasks._dirty = true;
+    }
+  } else {
+    // legacy v3 save: the town survives, and new families move into the homes
+    for (const b of World.buildings) {
+      if (b.construction > 0 || b.ruined) continue;
+      const funds = b.funds;
+      Sim.onBuildingAdded(b);
+      b.funds = funds;
+    }
   }
   Sim.grandOpening = null;
   if (typeof Gov !== 'undefined') Gov.restore(extra.gov);
-  Weather.init();
   afterMapEdit();
   hideInfo(); UI.selected = null;
-  toast('Village loaded 📂');
+  setVillageName(World.name);
 }
+
+function performLoad(data, label) {
+  if (!data) { toast('That slot is empty'); return false; }
+  const backup = buildSaveString(); // rollback point: a bad file must never cost the running village
+  try {
+    const extra = World.deserialize(data);
+    if (extra._incompat) { toast('⚠️ That save is from the older, smaller map and can\'t be loaded here'); return false; }
+    applyLoadedState(extra);
+    toast(`Village loaded 📂${label ? ' — ' + label : ''}`);
+    return true;
+  } catch (e) {
+    applyLoadedState(World.deserialize(backup));
+    toast('⚠️ Load failed (' + e.message + ') — your current village is untouched');
+    return false;
+  }
+}
+
+function slotMeta(key) {
+  const data = localStorage.getItem(key);
+  if (!data) return null;
+  try {
+    const o = JSON.parse(data);
+    return (o.extra && o.extra.meta) ||
+      { name: o.name || 'PixelVille', day: (o.extra || {}).day || 1, pop: '?', at: 0 };
+  } catch (e) { return null; }
+}
+
+function openSaveUI(mode) {
+  UI.saveMode = mode;
+  document.getElementById('saveui-title').textContent = mode === 'save' ? '💾 Save village' : '📂 Load village';
+  const wrap = document.getElementById('saveui-slots');
+  const keys = mode === 'load' ? SAVE_SLOTS.concat(AUTOSAVE_KEY) : SAVE_SLOTS;
+  let html = '';
+  keys.forEach((key, i) => {
+    const meta = slotMeta(key);
+    const label = key === AUTOSAVE_KEY ? '🕐 Autosave' : `Slot ${i + 1}`;
+    const desc = meta
+      ? `${meta.name} · day ${meta.day} · 👥 ${meta.pop}${meta.at ? ' · ' + new Date(meta.at).toLocaleString() : ''}`
+      : 'Empty';
+    html += `<div class="save-slot ${meta ? '' : 'empty'}" data-key="${key}">` +
+      `<span>${label}</span><span class="slot-meta">${desc}</span></div>`;
+  });
+  wrap.innerHTML = html;
+  wrap.querySelectorAll('.save-slot').forEach(el => el.addEventListener('click', () => {
+    const key = el.dataset.key;
+    if (UI.saveMode === 'save') {
+      if (slotMeta(key) && !confirm('Overwrite this slot?')) return;
+      writeSave(key);
+    } else if (!performLoad(localStorage.getItem(key), key === AUTOSAVE_KEY ? 'autosave' : null)) {
+      return;
+    }
+    document.getElementById('saveui').style.display = 'none';
+  }));
+  document.getElementById('saveui').style.display = 'flex';
+}
+
+function exportSave() {
+  const blob = new Blob([buildSaveString()], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${(World.name || 'pixelville').replace(/[^\w-]+/g, '_')}-day${Sim.day}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  toast('Village exported ⬇️ — keep the file safe!');
+}
+
+/* the rolling autosave: quiet, frequent, and also on tab-hide */
+let lastAutosaveAt = performance.now();
+setInterval(() => {
+  const mins = typeof Settings !== 'undefined' ? Settings.get('autosaveMin') : 2;
+  if (!mins || performance.now() - lastAutosaveAt < mins * 60000) return;
+  if (!World.buildings.length) return; // an empty map isn't worth a slot
+  lastAutosaveAt = performance.now();
+  writeSave(AUTOSAVE_KEY, true);
+}, 5000);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && World.buildings.length &&
+      typeof Settings !== 'undefined' && Settings.get('autosaveMin')) writeSave(AUTOSAVE_KEY, true);
+});
 function newMap() {
   if (!confirm('Start a fresh map? Unsaved progress is lost.')) return;
   World.genStarterMap();
@@ -2212,8 +2326,28 @@ function boot() {
   UI.camX = (GW * T) / 2 - canvas.width / (2 * UI.zoom);
   UI.camY = (GH * T) / 2 - canvas.height / (2 * UI.zoom);
   document.querySelectorAll('#speed button').forEach((b, i) => b.addEventListener('click', () => setSpeed(i)));
-  document.getElementById('btn-save').addEventListener('click', saveGame);
-  document.getElementById('btn-load').addEventListener('click', loadGame);
+  // one-time migration: the old single-slot save becomes Slot 1
+  if (localStorage.getItem('pixelville') && !localStorage.getItem(SAVE_SLOTS[0])) {
+    localStorage.setItem(SAVE_SLOTS[0], localStorage.getItem('pixelville'));
+    localStorage.removeItem('pixelville');
+  }
+  document.getElementById('btn-save').addEventListener('click', () => openSaveUI('save'));
+  document.getElementById('btn-load').addEventListener('click', () => openSaveUI('load'));
+  document.getElementById('saveui-close').addEventListener('click', () =>
+    document.getElementById('saveui').style.display = 'none');
+  document.getElementById('saveui-export').addEventListener('click', exportSave);
+  document.getElementById('saveui-import').addEventListener('click', () =>
+    document.getElementById('saveui-file').click());
+  document.getElementById('saveui-file').addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      if (performLoad(r.result, f.name)) document.getElementById('saveui').style.display = 'none';
+    };
+    r.readAsText(f);
+    e.target.value = '';
+  });
   document.getElementById('btn-new').addEventListener('click', newMap);
   const sb = document.getElementById('btn-sound');
   sb.textContent = Snd.enabled ? '🔊' : '🔇';
