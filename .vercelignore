@@ -1,0 +1,5 @@
+# server.js is a local dev convenience only. If Vercel sees it, it deploys the
+# repo as a Node serverless function and every static asset (style.css, js/*)
+# 404s. Excluding it makes Vercel serve the folder as the static site it is.
+server.js
+.agents

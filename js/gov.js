@@ -267,15 +267,25 @@ const Gov = {
       c.color = CAND_COLORS[i % CAND_COLORS.length];
       c.promise = this.promiseFor(c);
     });
-    // banners strung along busy streets — election season should be IMPOSSIBLE to miss
+    // banners on the grass VERGE beside busy streets — never in the lane
+    // itself (the road is for people and cars only)
     const roads = [];
     for (let i = 0; i < World.roadMap.length; i++) if (World.roadMap[i]) roads.push(i);
     const banners = [];
-    for (let k = 0; k < 90 && banners.length < 22 && roads.length; k++) {
+    const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    for (let k = 0; k < 160 && banners.length < 12 && roads.length; k++) {
       const r = roads[(Math.random() * roads.length) | 0];
-      const x = r % GW, y = (r / GW) | 0;
-      if (banners.some(bn => Math.abs(bn.x - x) + Math.abs(bn.y - y) < 4)) continue;
-      banners.push({ x, y, ci: banners.length % candidates.length });
+      const rx = r % GW, ry = (r / GW) | 0;
+      let spot = null;
+      for (const [dx, dy] of dirs) {
+        const x = rx + dx, y = ry + dy;
+        if (!World.inB(x, y)) continue;
+        const i = World.idx(x, y);
+        if (World.ground[i] === G_GRASS && !World.roadMap[i] && !World.railMap[i] && !World.bmap[i] && !World.reserved[i]) { spot = { x, y }; break; }
+      }
+      if (!spot) continue;
+      if (banners.some(bn => Math.abs(bn.x - spot.x) + Math.abs(bn.y - spot.y) < 7)) continue;
+      banners.push({ x: spot.x, y: spot.y, ci: banners.length % candidates.length });
     }
     // each candidate pitches a campaign camp — a tent with volunteers beside a road
     const camps = [];

@@ -1105,10 +1105,12 @@ const Life = {
       const cars = Sim.travelers().filter(p => p.trip.car);
       for (let i = 0; i < cars.length && !this.crash; i++) for (let j = i + 1; j < cars.length; j++) {
         const a = cars[i], b = cars[j];
-        // a crash needs CROSSING paths — two cars cruising the same way in
-        // the same lane are just traffic
-        if (Math.abs(a.x - b.x) + Math.abs(a.y - b.y) < 20 &&
-            (a.dirx !== b.dirx || a.diry !== b.diry)) {
+        // a real crash is a JUNCTION collision: one car crossing the other's
+        // path (one moving horizontally, the other vertically), right on top
+        // of each other. Cars merely passing in opposite lanes are just
+        // traffic and must never "crash" and vanish.
+        const crossing = (a.dirx !== 0) !== (b.dirx !== 0);
+        if (crossing && Math.abs(a.x - b.x) + Math.abs(a.y - b.y) < 11) {
           this.crash = {
             x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, t: 30, t0: 30,
             s1: a.trip.car.seed, s2: b.trip.car.seed,
