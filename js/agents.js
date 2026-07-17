@@ -1387,8 +1387,9 @@ const Sim = {
       const i = Math.floor(t.prog), f = t.prog - i;
       const [ax, ay] = t.path[i], [bx, by] = t.path[Math.min(i + 1, t.path.length - 1)];
       const dirx = bx - ax, diry = by - ay;
-      // lane offset: keep right of travel direction
-      const off = (t.car || t.taxi) ? 3.5 : 5.5;
+      // lane offset: vehicles keep right in the carriageway; people walk
+      // out on the footpath itself
+      const off = (t.car || t.taxi || t.moto) ? 3.5 : 6.5;
       p.x = (ax + (bx - ax) * f) * T + 8 + (diry !== 0 ? (diry > 0 ? -off : off) : 0);
       p.y = (ay + (by - ay) * f) * T + 8 + (dirx !== 0 ? (dirx > 0 ? off : -off) : 0);
       p.dirx = dirx; p.diry = diry;
@@ -1434,7 +1435,13 @@ const Sim = {
     p.state = 'walk';
     p.dest = dest;
     p.until = until;
-    p.trip = { path, prog: 0, car, taxi, moto };
+    // travellers on foot re-route along the footpaths (kerb-hugging path)
+    let usePath = path;
+    if (!car && !taxi && !moto) {
+      const wp = World.walkPath(p.at.door.x, p.at.door.y, dest.door.x, dest.door.y);
+      if (wp && wp.length > 1) usePath = wp;
+    }
+    p.trip = { path: usePath, prog: 0, car, taxi, moto };
     if (!car && !moto && p.kind !== 'kid' && Math.random() < 0.15) p.trip.dog = (Math.random() * 2) | 0; // walk the dog
     if (dest !== p.home && DEST_EMOJI[dest.type]) {
       p.bubble = DEST_EMOJI[dest.type];
@@ -1461,7 +1468,7 @@ const Sim = {
     if (!p.home.connected) return;
     const spot = World.nearestRoad(mk.x + 2, mk.y + 2, 7);
     if (!spot) return;
-    const out = World.roadPath(p.at.door.x, p.at.door.y, spot.x, spot.y);
+    const out = World.walkPath(p.at.door.x, p.at.door.y, spot.x, spot.y);
     if (!out || out.length < 3) return;
     p.state = 'walk';
     p.dest = p.home;
@@ -1485,7 +1492,7 @@ const Sim = {
     }
     if (!roads.length) return;
     const [tx, ty] = roads[(Math.random() * roads.length) | 0];
-    const out = World.roadPath(p.at.door.x, p.at.door.y, tx, ty);
+    const out = World.walkPath(p.at.door.x, p.at.door.y, tx, ty);
     if (!out || out.length < 3) return;
     p.state = 'walk';
     p.dest = p.home;

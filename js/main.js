@@ -68,7 +68,14 @@ function rebuildGround() {
       if (winter) { g.fillStyle = 'rgba(238,243,248,0.45)'; g.fillRect(x * T, y * T, T, T); }
       else if (!World.roadMap[i] && !World.bmap[i] && !World.railMap[i]) sandSpots.push([x, y]);
     } else if (gr === G_ROCK) {
+      // rock ground reads as scree-dusted meadow — the massif SPRITE carries
+      // the drama, so no grey slab peeks out beside the peaks
+      g.drawImage(grassSet[h2(x, y) % 4], x * T, y * T);
+      const nearGrass = [[0, -1], [1, 0], [0, 1], [-1, 0]].some(([ddx, ddy]) =>
+        World.inB(x + ddx, y + ddy) && World.ground[World.idx(x + ddx, y + ddy)] === G_GRASS);
+      g.globalAlpha = nearGrass ? 0.14 : 0.28;
       g.drawImage(SPR.rockTile, x * T, y * T);
+      g.globalAlpha = 1;
       if (winter) { g.fillStyle = 'rgba(238,243,248,0.35)'; g.fillRect(x * T, y * T, T, T); }
     } else {
       const hh = h2(x, y);
@@ -128,18 +135,28 @@ function rebuildGround() {
     if (!World.roadMap[i]) continue;
     const gr = World.ground[i];
     const m = World.roadMask(x, y);
-    // avenue intersections (2x2 blocks of 4-way tiles) get traffic lights;
-    // the post stands on the corner PAVEMENT beside the junction, never on
-    // the asphalt itself
-    if (popcount(m) === 4) {
-      World.signals.add(i);
-      if (!is4way(x - 1, y) && !is4way(x, y - 1)) {
-        for (const [cx2, cy2] of [[x - 1, y - 1], [x + 2, y - 1], [x - 1, y + 2], [x + 2, y + 2]]) {
-          if (World.inB(cx2, cy2) && !World.isRoad(cx2, cy2) &&
-              !World.bmap[World.idx(cx2, cy2)] && World.ground[World.idx(cx2, cy2)] !== G_WATER) {
-            UI.signalHeads.push([cx2, cy2]);
-            break;
-          }
+    // traffic lights ONLY at true avenue crossings (a full 2x2 block of
+    // 4-way tiles — every side-street T-junction stays unsignalled), and
+    // never two signalled junctions within a dozen tiles of each other.
+    // Each junction gets TWO posts on opposite corner pavements: the
+    // north-west post shows the north–south aspect, the south-east post
+    // the east–west aspect, so what you read matches what traffic does.
+    if (popcount(m) === 4 && !is4way(x - 1, y) && !is4way(x, y - 1) &&
+        is4way(x + 1, y) && is4way(x, y + 1) && is4way(x + 1, y + 1)) {
+      let spaced = true;
+      for (const [hx, hy] of UI.signalHeads)
+        if (Math.abs(hx - x) + Math.abs(hy - y) < 12) { spaced = false; break; }
+      if (spaced) {
+        const free = (cx2, cy2) => World.inB(cx2, cy2) && !World.isRoad(cx2, cy2) &&
+          !World.bmap[World.idx(cx2, cy2)] && World.ground[World.idx(cx2, cy2)] !== G_WATER;
+        let placedAny = false;
+        if (free(x - 1, y - 1)) { UI.signalHeads.push([x - 1, y - 1, 0]); placedAny = true; } // NS aspect
+        if (free(x + 2, y + 2)) { UI.signalHeads.push([x + 2, y + 2, 1]); placedAny = true; } // EW aspect
+        if (placedAny) {
+          World.signals.add(i);
+          World.signals.add(World.idx(x + 1, y));
+          World.signals.add(World.idx(x, y + 1));
+          World.signals.add(World.idx(x + 1, y + 1));
         }
       }
     }
@@ -270,6 +287,11 @@ function buildingLitBase(b) {
     return 0.3;
   }
   if (d.hours && d.hours.s === 0 && d.hours.e === 1440) return 1; // 24h services
+  // office towers burn the evening oil: late shifts, cleaners, lobby lights
+  if (b.type === 'skyscraper' || b.type === 'office' || b.type === 'exchange') {
+    if (c >= 1410 || c < 300) return 0.4;  // a scatter of floors all night
+    if (c >= 1020) return 0.85;            // the evening glow of a working tower
+  }
   if (d.hours) {
     const open = c >= d.hours.s - 45 && c <= d.hours.e + 45;
     return open ? 1 : (b.id % 6 === 0 ? 0.18 : 0); // the odd security light
@@ -364,14 +386,16 @@ function render(now) {
   // traffic lights at avenue intersections (cars genuinely obey them);
   // the phase runs on real time so it never strobes under fast-forward
   const nsGreen = World.nsGreen();
-  for (const [x, y] of UI.signalHeads || []) {
+  for (const [x, y, dctl] of UI.signalHeads || []) {
     if (x < vx0 - 1 || x > vx1 || y < vy0 - 1 || y > vy1) continue;
+    // each post shows ONE aspect — the direction it controls
+    const green = dctl === 0 ? nsGreen : !nsGreen;
     const px0 = x * T + 5, py0 = y * T - 4; // standing on its corner pavement
     ctx.fillStyle = '#3c4048'; ctx.fillRect(px0 + 2, py0 + 9, 1, 11);          // pole
     ctx.fillStyle = '#26282e'; ctx.fillRect(px0, py0, 5, 9);                    // head
-    ctx.fillStyle = nsGreen ? '#802020' : '#ff5040'; ctx.fillRect(px0 + 1, py0 + 1, 3, 3);   // EW aspect
-    ctx.fillStyle = nsGreen ? '#40e050' : '#1e5a28'; ctx.fillRect(px0 + 1, py0 + 5, 3, 3);   // NS aspect
-    if (dark > 0.15) UI.lights.push({ x: px0 + 2, y: py0 + 4, r: 8, a: 0.7, tint: nsGreen ? 'green' : 'red' });
+    ctx.fillStyle = green ? '#4a1616' : '#ff5040'; ctx.fillRect(px0 + 1, py0 + 1, 3, 3); // red lamp
+    ctx.fillStyle = green ? '#40e050' : '#143f1c'; ctx.fillRect(px0 + 1, py0 + 5, 3, 3); // green lamp
+    if (dark > 0.15) UI.lights.push({ x: px0 + 2, y: py0 + (green ? 6 : 2), r: 7, a: 0.7, tint: green ? 'green' : 'red' });
   }
 
   // level-crossing gates: barriers drop and blinkers flash while a train is near
@@ -462,6 +486,7 @@ function render(now) {
   // public transport & harbour life
   for (const bus of Life.buses) ents.push({ kind: 'bus', u: bus, base: bus.y + 4 });
   for (const train of Life.trains) {
+    if (train.hidden) continue; // stabled outside its timetable window
     const nCars = train.cars || 3;
     for (let ci = 0; ci < nCars; ci++)
       ents.push({ kind: 'traincar', u: train, off: ci * 1.4, engine: ci === 0, base: train.y + 4 + ci * 0.01 });
@@ -507,8 +532,8 @@ function render(now) {
       const sway = Weather.season === 3 ? 0 : Math.round(Math.sin(now / 850 + e.x * 1.7 + e.y * 0.9));
       ctx.drawImage(t.img, e.x * T + sway, e.y * T - t.oy);
     } else if (e.kind === 'mtn') {
+      // no cast ellipse: the massif's own blended skirt does the grounding
       const ms = SPR.mountains[e.v];
-      shadow(e.x * T + MSIZE * 8, e.base - 3, MSIZE * 8, 4);
       ctx.drawImage(ms.img, e.x * T, e.y * T - ms.oy);
     } else if (e.kind === 'bld') {
       const b = e.b;
@@ -615,6 +640,12 @@ function render(now) {
           ctx.fillStyle = ecols[(b.id + k) % 3];
           ctx.fillRect(b.door.x * T + 2 + k * 3, (b.y + b.h) * T + 2, 2, 2);
         }
+      }
+      // aviation beacon blinking on the tallest towers
+      if (b.type === 'skyscraper' && dark > 0.12 && Math.floor(now / 900) % 2) {
+        const bx2 = b.x * T + (b.w * T >> 1), by2 = b.y * T - s.oy + 1;
+        ctx.fillStyle = '#ff4040'; ctx.fillRect(bx2, by2, 2, 2);
+        UI.lights.push({ x: bx2 + 1, y: by2 + 1, r: 9, a: 0.8, tint: 'red' });
       }
       // the mayor's flag flies over an occupied town hall
       if (b.type === 'townhall' && typeof Gov !== 'undefined' && Gov.leader) {
@@ -763,16 +794,15 @@ function render(now) {
         shadow(p.x, p.y + 3, 6, 2);
         if (p.dirx !== 0) ctx.drawImage(spr.h, Math.round(p.x) - 6, Math.round(p.y) - 4);
         else ctx.drawImage(spr.v, Math.round(p.x) - 4, Math.round(p.y) - 6);
-        if (dark > 0.1) { // headlights
-          const hx = p.x + (p.dirx || 0) * 12, hy = p.y + (p.diry || 0) * 12;
-          UI.lights.push({ x: hx, y: hy, r: 15, a: 0.85, tint: 'cool' });
-          UI.lights.push({ x: p.x, y: p.y, r: 8, a: 0.5, tint: 'cool' });
+        if (dark > 0.1) { // headlight beam sweeping the road ahead
+          UI.lights.push({ x: p.x + (p.dirx || 0) * 4, y: p.y + (p.diry || 0) * 4, r: 16, a: 0.85, cone: true, dirx: p.dirx, diry: p.diry });
+          UI.lights.push({ x: p.x, y: p.y, r: 6, a: 0.35, tint: 'cool' });
         }
       } else if (p.trip.moto) {
         shadow(p.x, p.y + 2.5, 5, 1.6);
         if (p.dirx !== 0) ctx.drawImage(SPR.moto.h, Math.round(p.x) - 5, Math.round(p.y) - 4);
         else ctx.drawImage(SPR.moto.v, Math.round(p.x) - 3, Math.round(p.y) - 5);
-        if (dark > 0.1) UI.lights.push({ x: p.x + (p.dirx || 0) * 9, y: p.y + (p.diry || 0) * 9, r: 11, a: 0.7, tint: 'cool' });
+        if (dark > 0.1) UI.lights.push({ x: p.x + (p.dirx || 0) * 3, y: p.y + (p.diry || 0) * 3, r: 10, a: 0.7, cone: true, dirx: p.dirx, diry: p.diry });
       } else {
         const spr = SPR.person(p.kind, p.seed);
         shadow(p.x, p.y + 1.5, 3, 1.2);
@@ -805,14 +835,14 @@ function render(now) {
       else ctx.drawImage(spr.v, Math.round(u.x) - 4, Math.round(u.y) - 6);
       const ft = Math.floor(now / 180) % 2 ? 'red' : 'blue';
       UI.lights.push({ x: u.x, y: u.y, r: 22, a: 0.9, tint: ft });
-      if (dark > 0.1) UI.lights.push({ x: u.x + (u.dirx || 0) * 12, y: u.y + (u.diry || 0) * 12, r: 15, a: 0.8, tint: 'cool' });
+      if (dark > 0.1) UI.lights.push({ x: u.x + (u.dirx || 0) * 4, y: u.y + (u.diry || 0) * 4, r: 15, a: 0.8, cone: true, dirx: u.dirx, diry: u.diry });
     } else if (e.kind === 'firetruck') {
       const u = e.u, spr = SPR.fireTruck;
       shadow(u.x, u.y + 3, 6, 2);
       if (u.dirx !== 0) ctx.drawImage(spr.h, Math.round(u.x) - 6, Math.round(u.y) - 4);
       else ctx.drawImage(spr.v, Math.round(u.x) - 4, Math.round(u.y) - 6);
       UI.lights.push({ x: u.x, y: u.y - 3, r: 20, a: 0.9, tint: Math.floor(now / 170) % 2 ? 'red' : 'orange' });
-      if (dark > 0.1) UI.lights.push({ x: u.x + (u.dirx || 0) * 12, y: u.y + (u.diry || 0) * 12, r: 15, a: 0.8, tint: 'cool' });
+      if (dark > 0.1) UI.lights.push({ x: u.x + (u.dirx || 0) * 4, y: u.y + (u.diry || 0) * 4, r: 15, a: 0.8, cone: true, dirx: u.dirx, diry: u.diry });
       if (u.phase === 'douse' && u.target) { // arcing water jet onto the flames
         const wtx = u.target.x * T + u.target.w * 8, wty = u.target.y * T + 4;
         ctx.fillStyle = 'rgba(140,200,245,0.9)';
@@ -867,26 +897,32 @@ function render(now) {
       shadow(tr.x, tr.y + 3, 6, 2);
       if (tr.dirx !== 0) ctx.drawImage(spr.h, Math.round(tr.x) - 6, Math.round(tr.y) - 4);
       else ctx.drawImage(spr.v, Math.round(tr.x) - 4, Math.round(tr.y) - 6);
-      if (dark > 0.1) UI.lights.push({ x: tr.x + (tr.dirx || 0) * 12, y: tr.y + (tr.diry || 0) * 12, r: 15, a: 0.85, tint: 'cool' });
+      if (dark > 0.1) UI.lights.push({ x: tr.x + (tr.dirx || 0) * 4, y: tr.y + (tr.diry || 0) * 4, r: 15, a: 0.85, cone: true, dirx: tr.dirx, diry: tr.diry });
     } else if (e.kind === 'bus') {
       const u = e.u;
       shadow(u.x, u.y + 3, 8, 2.4);
       if (u.dirx !== 0) ctx.drawImage(SPR.bus.h, Math.round(u.x) - 8, Math.round(u.y) - 4);
       else ctx.drawImage(SPR.bus.v, Math.round(u.x) - 4, Math.round(u.y) - 8);
-      if (dark > 0.1) UI.lights.push({ x: u.x + (u.dirx || 0) * 12, y: u.y + (u.diry || 0) * 12, r: 15, a: 0.8, tint: 'cool' });
+      if (dark > 0.1) UI.lights.push({ x: u.x + (u.dirx || 0) * 5, y: u.y + (u.diry || 0) * 5, r: 17, a: 0.8, cone: true, dirx: u.dirx, diry: u.diry });
     } else if (e.kind === 'traincar') {
       const tr = e.u;
       const o = { x: tr.x, y: tr.y, dirx: tr.dirx, diry: tr.diry };
       if (e.off) Life.followPath(o, tr.route, Math.max(0, Math.min(tr.route.length - 1, tr.prog - e.off * tr.dir)), 0);
       // each service holds its own track of the three-track mainline
       if (tr.lane) { if (o.dirx !== 0) o.y += tr.lane; else o.x += tr.lane; }
-      const spr = e.engine
-        ? (tr.type === 'express' ? SPR.trainExpress : tr.type === 'freight' ? SPR.freightEngine : SPR.trainEngine)
-        : (tr.type === 'express' ? SPR.expressCoach : tr.type === 'freight' ? SPR.freightCar : SPR.trainCoach);
+      const fleet = {
+        local: [SPR.trainEngine, SPR.trainCoach],
+        commuter: [SPR.commuterEngine, SPR.commuterCoach],
+        express: [SPR.trainExpress, SPR.expressCoach],
+        nightliner: [SPR.nightEngine, SPR.nightCoach],
+        freight: [SPR.freightEngine, SPR.freightCar],
+      };
+      const spr = (fleet[tr.type] || fleet.local)[e.engine ? 0 : 1];
       shadow(o.x, o.y + 3, 9, 2.4);
       if (o.dirx !== 0) ctx.drawImage(spr.h, Math.round(o.x) - 9, Math.round(o.y) - 4);
       else ctx.drawImage(spr.v, Math.round(o.x) - 4, Math.round(o.y) - 9);
-      if (e.engine && dark > 0.1) UI.lights.push({ x: o.x + (o.dirx || 0) * 14, y: o.y + (o.diry || 0) * 14, r: 20, a: 0.9, tint: 'warm' });
+      if (e.engine && dark > 0.1) // a locomotive throws a LONG hard beam down the line
+        UI.lights.push({ x: o.x + (o.dirx || 0) * 8, y: o.y + (o.diry || 0) * 8, r: 30, a: 1, cone: true, dirx: o.dirx, diry: o.diry });
       if (e.engine && tr.type !== 'express' && Math.random() < 0.12 && UI.speeds[UI.speedIdx] > 0)
         UI.smoke.push({ x: o.x, y: o.y - 7, r: 1.4 + Math.random(), life: 0.7 });
     } else if (e.kind === 'raft') {
@@ -1225,21 +1261,6 @@ function render(now) {
   }
   ctx.globalAlpha = 1;
 
-  // mysterious lights on the peaks at night
-  if (dark > 0.25) {
-    for (const m of World.mountains) {
-      const ms = SPR.mountains[(m.v || 0) % SPR.mountains.length];
-      for (let pi = 0; pi < ms.peaks.length; pi++) {
-        if ((m.x * 31 + m.y * 17 + pi) % 3 === 0) continue; // not every peak
-        const wob = Math.sin(now / 700 + pi * 2 + m.x) * 2.5;
-        const px = m.x * T + ms.peaks[pi][0] + wob;
-        const py = m.y * T - ms.oy + ms.peaks[pi][1] + 3;
-        const flick = 0.55 + 0.3 * Math.sin(now / 120 + pi * 3 + m.y);
-        UI.lights.push({ x: px, y: py, r: 11 + flick * 3, a: flick, tint: 'orange', flame: true });
-      }
-    }
-  }
-
   // road works: cones, barrier, dig crew
   for (const rw of Life.roadworks) {
     const rx = rw.x * T, ry = rw.y * T;
@@ -1477,18 +1498,36 @@ function drawNight(dark, z) {
   const k = Math.min(1, dark / 0.45);
   for (const L of UI.lights) {
     const sx = (L.x - UI.camX) * z, sy = (L.y - UI.camY) * z, sr = L.r * z;
-    if (sx < -sr || sy < -sr || sx > canvas.width + sr || sy > canvas.height + sr) continue;
+    if (sx < -sr * 3 || sy < -sr * 3 || sx > canvas.width + sr * 3 || sy > canvas.height + sr * 3) continue;
+    if (L.cone) { // headlights are BEAMS sweeping ahead, not lamp pools
+      ng.save();
+      ng.translate(sx, sy);
+      ng.rotate(Math.atan2(L.diry || 0, L.dirx || 1));
+      ng.globalAlpha = Math.min(1, L.a * k);
+      ng.drawImage(SPR.beam, 0, -sr * 0.55, sr * 2.6, sr * 1.1);
+      ng.restore();
+      continue;
+    }
     ng.globalAlpha = Math.min(1, L.a * k);
     ng.drawImage(SPR.glow, sx - sr, sy - sr, sr * 2, sr * 2);
   }
   ng.globalAlpha = 1;
   ctx.drawImage(UI.nightCanvas, 0, 0);
-  // colored halos
+  // colored halos & cool beam tint
   ctx.globalCompositeOperation = 'screen';
   for (const L of UI.lights) {
-    if (!L.tint) continue;
     const sx = (L.x - UI.camX) * z, sy = (L.y - UI.camY) * z, sr = L.r * z * 1.15;
-    if (sx < -sr || sy < -sr || sx > canvas.width + sr || sy > canvas.height + sr) continue;
+    if (sx < -sr * 3 || sy < -sr * 3 || sx > canvas.width + sr * 3 || sy > canvas.height + sr * 3) continue;
+    if (L.cone) {
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(Math.atan2(L.diry || 0, L.dirx || 1));
+      ctx.globalAlpha = Math.min(0.4, L.a * k * 0.35);
+      ctx.drawImage(SPR.beamTint, 0, -sr * 0.5, sr * 2.3, sr);
+      ctx.restore();
+      continue;
+    }
+    if (!L.tint) continue;
     ctx.globalAlpha = Math.min(0.5, L.a * k * 0.45);
     ctx.drawImage(SPR.glowTints[L.tint], sx - sr, sy - sr, sr * 2, sr * 2);
   }
@@ -1543,7 +1582,7 @@ function drawGhost() {
     if (d.tool === 'forest') { ctx.fillStyle = '#4fe07a'; ctx.beginPath(); ctx.arc(x * T + 8, y * T + 8, 3.2 * T, 0, 7); ctx.fill(); }
     if (d.tool === 'pond') { ctx.fillStyle = '#57a5e8'; ctx.beginPath(); ctx.arc(x * T + 8, y * T + 8, 1.8 * T, 0, 7); ctx.fill(); }
     if (d.tool === 'lake') { ctx.fillStyle = '#57a5e8'; ctx.beginPath(); ctx.ellipse(x * T + 8, y * T + 8, 4.5 * T, 3.2 * T, 0, 0, 7); ctx.fill(); }
-    if (d.tool === 'mountain') { ctx.fillStyle = '#98938a'; ctx.fillRect((x - 2) * T, (y - 2) * T, MSIZE * T, MSIZE * T); }
+    if (d.tool === 'mountain') { ctx.fillStyle = '#98938a'; ctx.fillRect((x - (MSIZE >> 1)) * T, (y - (MSIZE >> 1)) * T, MSIZE * T, MSIZE * T); }
     ctx.globalAlpha = 1;
     if (UI.dragStart && (d.tool === 'road' || d.tool === 'river' || d.tool === 'rail')) {
       ctx.globalAlpha = 0.55;
@@ -1585,7 +1624,7 @@ function placeAt(x, y) {
     case 'pond': World.stampWaterDisc(x, y, 1.8); afterMapEdit(); break;
     case 'lake': World.stampLake(x, y, 4 + Math.random() * 1.5, 2.8 + Math.random(), null); afterMapEdit(); break;
     case 'mountain':
-      if (World.placeMountain(x - 2, y - 2)) toast('Mountain range raised ⛰️ — roads will carve around it');
+      if (World.placeMountain(x - (MSIZE >> 1), y - (MSIZE >> 1))) toast('Mountain range raised ⛰️ — roads will carve around it');
       afterMapEdit(); break;
     case 'bulldoze': {
       const r = World.bulldoze(x, y);

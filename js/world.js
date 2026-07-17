@@ -6,7 +6,7 @@
 
 const GW = 128, GH = 128;
 const G_GRASS = 0, G_WATER = 1, G_ROCK = 2, G_SAND = 3;
-const MSIZE = 5; // mountain footprint (tiles)
+const MSIZE = 11; // mountain footprint (tiles) — mountains are MASSIVE now
 const MIN_PER_SEC = 4; // game-minutes per real second at 1x — one day ≈ 6 real minutes
 
 const World = {
@@ -51,7 +51,7 @@ const World = {
         if (x * x + y * y > r * r || R() < 0.35) continue;
         const tx = cx + x, ty = cy + y;
         if (this.inB(tx, ty) && this.ground[this.idx(tx, ty)] === G_GRASS)
-          this.tree[this.idx(tx, ty)] = 1 + Math.floor(R() * 3);
+          this.tree[this.idx(tx, ty)] = 1 + Math.floor(R() * 6);
       }
     }
     // lakes
@@ -59,10 +59,26 @@ const World = {
     this.stampLake(96 + Math.floor(R() * 14), 20 + Math.floor(R() * 10), 4 + R() * 2, 3 + R() * 1.5, R);
     // a river across the east side
     this.carveRiver(GW - 10, 2 + Math.floor(R() * 8), 62 + Math.floor(R() * 14), GH - 2, R);
-    // imposing mountain range, bottom-left
-    const mx = 10 + Math.floor(R() * 10), my = 74 + Math.floor(R() * 8);
-    this.placeMountain(mx, my); this.placeMountain(mx + 5, my + 3);
-    this.placeMountain(mx + 2, my + 7); this.placeMountain(mx + 8, my - 2);
+    // an imposing mountain range, bottom-left — two massive massifs
+    const mx = 6 + Math.floor(R() * 8), my = 68 + Math.floor(R() * 6);
+    this.placeMountain(mx, my);
+    this.placeMountain(mx + 12, my + 6);
+    // large dense forests spread across the map, each with its own species
+    for (let f = 0; f < 4; f++) {
+      const fx = 10 + Math.floor(R() * (GW - 20)), fy = 8 + Math.floor(R() * (GH - 36));
+      if (Math.abs(fx - GW / 2) < 15 && Math.abs(fy - GH / 2) < 15) continue; // keep the centre buildable
+      const species = 1 + Math.floor(R() * 6);
+      const fr = 7 + R() * 5;
+      for (let y = -Math.ceil(fr) - 1; y <= fr + 1; y++) for (let x = -Math.ceil(fr) - 1; x <= fr + 1; x++) {
+        const d = x * x + y * y;
+        if (d > fr * fr * (0.8 + R() * 0.4) || R() < 0.16) continue;
+        const tx = fx + x, ty = fy + y;
+        if (!this.inB(tx, ty)) continue;
+        const k = this.idx(tx, ty);
+        if (this.ground[k] === G_GRASS && !this.roadMap[k] && !this.bmap[k])
+          this.tree[k] = R() < 0.75 ? species : 1 + Math.floor(R() * 6);
+      }
+    }
     // the sea along the southern edge, with a broad sandy beach
     this.carveSea(R);
     // country roads entering from the west and the north — visitors arrive along them
@@ -138,7 +154,7 @@ const World = {
       const k = this.idx(x + i, y + j);
       this.ground[k] = G_ROCK; this.tree[k] = 0;
     }
-    this.mountains.push({ x, y, v: this.mountains.length % 2 });
+    this.mountains.push({ x, y, v: this.mountains.length % 3 });
     this.dirty = true;
     return true;
   },
@@ -146,7 +162,7 @@ const World = {
     if (!this.inB(x, y)) return false;
     const i = this.idx(x, y);
     if (this.ground[i] !== G_GRASS || this.bmap[i] || this.roadMap[i]) return false;
-    this.tree[i] = 1 + Math.floor(Math.random() * 3);
+    this.tree[i] = 1 + Math.floor(Math.random() * 6);
     this.dirty = true;
     return true;
   },
@@ -649,6 +665,62 @@ const World = {
       }
     }
     if (prev[goal] === -1) return null;
+    const path = [];
+    let cur = goal;
+    while (cur !== start) { path.push([cur % GW, (cur / GW) | 0]); cur = prev[cur]; }
+    path.push([ax, ay]);
+    path.reverse();
+    return path;
+  },
+
+  /* pedestrian route: the same road network, but people stick to the
+     footpaths — kerb-side tiles cost far less than the middle of the
+     carriageway, so walkers hug the pavement and only cut across at
+     junctions (where every tile is "inner" and the cost evens out) */
+  walkPath(ax, ay, bx, by) {
+    if (!this.isRoad(ax, ay) || !this.isRoad(bx, by)) return null;
+    if (ax === bx && ay === by) return [[ax, ay]];
+    const dist = new Float32Array(GW * GH).fill(Infinity);
+    const prev = new Int32Array(GW * GH).fill(-1);
+    const start = this.idx(ax, ay), goal = this.idx(bx, by);
+    const heap = [];
+    const push = (c, s) => {
+      heap.push([c, s]);
+      let i = heap.length - 1;
+      while (i > 0) { const q = (i - 1) >> 1; if (heap[q][0] <= heap[i][0]) break; [heap[q], heap[i]] = [heap[i], heap[q]]; i = q; }
+    };
+    const pop = () => {
+      const top = heap[0], last = heap.pop();
+      if (heap.length) {
+        heap[0] = last;
+        let i = 0;
+        for (;;) {
+          let m = i; const l = 2 * i + 1, r = l + 1;
+          if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
+          if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
+          if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m;
+        }
+      }
+      return top;
+    };
+    const kerbCost = (x, y) =>
+      (!this.isRoad(x, y - 1) || !this.isRoad(x, y + 1) || !this.isRoad(x - 1, y) || !this.isRoad(x + 1, y)) ? 1 : 2.6;
+    dist[start] = 0;
+    push(0, start);
+    while (heap.length) {
+      const [c, cur] = pop();
+      if (c > dist[cur]) continue;
+      if (cur === goal) break;
+      const cx = cur % GW, cy = (cur / GW) | 0;
+      for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+        const nx = cx + dx, ny = cy + dy;
+        if (!this.isRoad(nx, ny)) continue;
+        const ni = this.idx(nx, ny);
+        const nc = c + kerbCost(nx, ny);
+        if (nc < dist[ni]) { dist[ni] = nc; prev[ni] = cur; push(nc, ni); }
+      }
+    }
+    if (prev[goal] === -1 && goal !== start) return null;
     const path = [];
     let cur = goal;
     while (cur !== start) { path.push([cur % GW, (cur / GW) | 0]); cur = prev[cur]; }

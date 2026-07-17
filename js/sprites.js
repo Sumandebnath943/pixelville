@@ -1423,25 +1423,29 @@ const SPR = {
   },
 
   makeTrees() {
-    // seasonal canopies: spring (blossom), summer (deep green), autumn (fire), winter (bare + snow)
+    // SIX species now: three round broadleafs, a pine, a birch and a broad
+    // old oak — each with seasonal dress (blossom, deep green, fire, snow)
     const palettes = [
       [['#5f9648', '#74ab58'], ['#548c40', '#68a04e'], ['#6ba050', '#80b562']],
       [['#4e8a3c', '#639e4a'], ['#457f34', '#589342'], ['#578f40', '#6ca350']],
       [['#c07830', '#d4903e'], ['#b05a2c', '#c8703a'], ['#a8862e', '#c0a040']],
       null, // winter drawn separately
     ];
+    const bareTree = (p, tall) => { // leafless winter skeleton with snow
+      p.rect(7, 8, 2, T - 3 + (tall ? 3 : 0), '#6b4a2f');
+      p.vl(5, 9, 4, '#5d3f28'); p.vl(10, 8, 5, '#5d3f28');
+      p.vl(3, 6, 4, '#5d3f28'); p.vl(12, 5, 5, '#5d3f28');
+      p.px(5, 8, '#f4f7fb'); p.px(10, 7, '#f4f7fb'); p.px(3, 5, '#f4f7fb'); p.px(12, 4, '#f4f7fb');
+      p.hl(6, 7, 4, '#f4f7fb');
+    };
     this.treeSeasons = [];
     for (let s = 0; s < 4; s++) {
       const set = [];
+      // 0–2: the familiar round broadleafs
       for (let v = 0; v < 3; v++) {
         const p = new P(T, T + 6);
-        if (s === 3) { // bare branches with snow
-          p.rect(7, 8, 2, T - 3, '#6b4a2f');
-          p.vl(5, 9, 4, '#5d3f28'); p.vl(10, 8, 5, '#5d3f28');
-          p.vl(3, 6, 4, '#5d3f28'); p.vl(12, 5, 5, '#5d3f28');
-          p.px(5, 8, '#f4f7fb'); p.px(10, 7, '#f4f7fb'); p.px(3, 5, '#f4f7fb'); p.px(12, 4, '#f4f7fb');
-          p.hl(6, 7, 4, '#f4f7fb');
-        } else {
+        if (s === 3) bareTree(p);
+        else {
           const [d, l] = palettes[s][v];
           p.rect(7, T + 1, 2, 4, '#6b4a2f');
           p.disc(8, 9, 6, d);
@@ -1452,6 +1456,44 @@ const SPR = {
         }
         set.push({ img: p.c, oy: 6 });
       }
+      // 3: pine — evergreen, snow-laden in winter
+      {
+        const p = new P(T, T + 10);
+        const dk = s === 2 ? '#2e5a38' : '#2e4b34', lt = s === 2 ? '#3f7048' : '#3a6242';
+        p.rect(7, T + 5, 2, 4, '#5d4630');
+        for (let k = 0; k < 4; k++) {
+          const w2 = 12 - k * 2.6, y2 = T + 2 - k * 5;
+          p.g.fillStyle = k % 2 ? lt : dk;
+          p.g.beginPath(); p.g.moveTo(8, y2 - 6); p.g.lineTo(8 - w2 / 2, y2); p.g.lineTo(8 + w2 / 2, y2); p.g.closePath(); p.g.fill();
+        }
+        if (s === 3) { for (let k = 0; k < 4; k++) { p.hl(8 - (5 - k), T + 1 - k * 5, 10 - k * 2, '#f4f7fb'); } }
+        set.push({ img: p.c, oy: 10 });
+      }
+      // 4: birch — pale trunk, airy little canopy
+      {
+        const p = new P(T, T + 8);
+        if (s === 3) { p.rect(7, 6, 2, T + 1, '#e8e4d8'); p.px(7, 9, '#6b6458'); p.px(8, 13, '#6b6458'); p.vl(5, 7, 3, '#d8d4c8'); p.vl(10, 6, 4, '#d8d4c8'); p.hl(6, 5, 4, '#f4f7fb'); }
+        else {
+          const c1 = s === 2 ? '#e8c840' : s === 0 ? '#8fbe62' : '#7cb254';
+          p.rect(7, 12, 2, T - 5, '#e8e4d8'); p.px(7, 14, '#6b6458'); p.px(8, 18, '#6b6458');
+          p.disc(8, 8, 4, c1); p.disc(6, 6, 3, shade(c1, 0.18)); p.disc(10, 7, 3, shade(c1, -0.08));
+        }
+        set.push({ img: p.c, oy: 8 });
+      }
+      // 5: old oak — wide, heavy crown
+      {
+        const p = new P(T, T + 9);
+        if (s === 3) bareTree(p, true);
+        else {
+          const [d, l] = palettes[s][(s + 1) % 3];
+          p.rect(6, T + 3, 4, 5, '#5d4630');
+          p.disc(8, 9, 7, d);
+          p.disc(5, 7, 4, l); p.disc(11, 7, 4, shade(l, -0.06));
+          p.disc(8, 4, 3, shade(l, 0.12));
+          if (s === 2) { p.px(3, 15, '#c07830'); p.px(13, 16, '#b05a2c'); }
+        }
+        set.push({ img: p.c, oy: 9 });
+      }
       this.treeSeasons.push(set);
     }
     this.treeVars = this.treeSeasons[0];
@@ -1459,18 +1501,19 @@ const SPR = {
 
   makeRoads() {
     // mask bits: 1=N 2=E 4=S 8=W
-    const ASPH = '#7b7f88', EDGE = '#585c66', DASH = '#e8e4cf', SIDE = '#cfcaba', CURB = '#a29d8e';
+    // every road edge carries a PROPER FOOTPATH: a 4px paved walk with
+    // paving joints and a kerb line — pedestrians walk here, not in the lanes
+    const ASPH = '#7b7f88', DASH = '#e8e4cf', SIDE = '#d3cec0', JOINT = '#bdb8a8', CURB = '#9a958a';
     for (let m = 0; m < 16; m++) {
       const p = new P(T, T);
       p.rect(0, 0, T, T, ASPH);
       const R = mulberry32(4000 + m);
       p.dither(0, 0, T, T, '#747881', 0.15, R);
       const n = m & 1, e = m & 2, s = m & 4, w = m & 8;
-      // sidewalks on unconnected sides
-      if (!n) { p.rect(0, 0, T, 3, SIDE); p.hl(0, 3, T, CURB); }
-      if (!s) { p.rect(0, T - 3, T, 3, SIDE); p.hl(0, T - 4, T, CURB); }
-      if (!w) { p.rect(0, 0, 3, T, SIDE); p.vl(3, 0, T, CURB); }
-      if (!e) { p.rect(T - 3, 0, 3, T, SIDE); p.vl(T - 4, 0, T, CURB); }
+      if (!n) { p.rect(0, 0, T, 4, SIDE); for (let x2 = 3; x2 < T; x2 += 4) p.vl(x2, 0, 4, JOINT); p.hl(0, 4, T, CURB); }
+      if (!s) { p.rect(0, T - 4, T, 4, SIDE); for (let x2 = 3; x2 < T; x2 += 4) p.vl(x2, T - 4, 4, JOINT); p.hl(0, T - 5, T, CURB); }
+      if (!w) { p.rect(0, 0, 4, T, SIDE); for (let y2 = 3; y2 < T; y2 += 4) p.hl(0, y2, 4, JOINT); p.vl(4, 0, T, CURB); }
+      if (!e) { p.rect(T - 4, 0, 4, T, SIDE); for (let y2 = 3; y2 < T; y2 += 4) p.hl(T - 4, y2, 4, JOINT); p.vl(T - 5, 0, T, CURB); }
       // center dashes on straights
       if (n && s && !e && !w) { p.rect(7, 1, 2, 4, DASH); p.rect(7, 8, 2, 4, DASH); }
       if (e && w && !n && !s) { p.rect(1, 7, 4, 2, DASH); p.rect(8, 7, 4, 2, DASH); }
@@ -1495,17 +1538,23 @@ const SPR = {
   },
 
   makeMountains() {
-    // massive 5x5-footprint ranges — hazy back ridges, peaks with shaded west
-    // faces and sunlit ridgelines, crags, jagged snow caps with gullies, and
-    // a mossy pine-fringed foothill that blends into the grass
+    // TRULY massive ranges (11x11-tile footprint, ~300px tall) — hazy back
+    // ridges, shaded west faces, sunlit ridgelines, crags, jagged snow caps,
+    // and a broad mossy pine skirt that dissolves into the meadow so the
+    // massif belongs to the landscape instead of sitting on it
     this.mountains = [];
-    for (let v = 0; v < 2; v++) {
-      const W = 5 * T, EX = 60, H = 5 * T + EX;
+    for (let v = 0; v < 3; v++) {
+      const W = MSIZE * T, EX = 130, H = MSIZE * T + EX;
+      const sc = W / 80; // the painter thinks in the old 80px space
       const p = new P(W, H);
       const g = p.g;
       const R = mulberry32(7100 + v * 313);
-      const peaks = [];
-      const baseY = H - 10;
+      const peaks = [];   // final sprite coordinates (for hikers & flames)
+      const opeaks = [];  // painter-space coordinates (for the trail)
+      const OW = 80, OH = 140;
+      g.save();
+      g.scale(sc, sc); // paint in the familiar space, output at massif scale
+      const baseY = OH - 10;
 
       // distant haze ridge behind everything
       const haze = (cx, topY, bw) => {
@@ -1584,7 +1633,8 @@ const SPR = {
           g.lineTo(gx + R() * 4 - 2, hem + 5 + R() * 7);
           g.stroke();
         }
-        peaks.push([cx, topY + 3]);
+        opeaks.push([cx, topY + 3]);
+        peaks.push([cx * sc, (topY + 3) * sc]);
       };
 
       const warm = { dark: '#5f594f', mid: '#7e766a', lit: '#a89f8f', spk: '#8d8577' };
@@ -1594,21 +1644,26 @@ const SPR = {
         peak(20, 30, 46, warm);
         peak(56, 6, 56, warm);
         peak(37, 44, 36, { dark: '#544f46', mid: '#6e675c', lit: '#948b7b', spk: '#7e7669' });
-      } else {
+      } else if (v === 1) {
         haze(46, 22, 78);
         peak(60, 26, 48, cool);
         peak(25, 4, 58, cool);
         peak(44, 48, 32, { dark: '#4d5257', mid: '#676d74', lit: '#8b939b', spk: '#767d85' });
+      } else {
+        haze(24, 30, 56); haze(52, 24, 64);
+        peak(16, 34, 40, cool);
+        peak(42, 8, 60, warm);
+        peak(64, 30, 42, { dark: '#575148', mid: '#736b5e', lit: '#9a9180', spk: '#837b6d' });
       }
 
       // foothill fringe: mossy mounds, scree, and a stand of pines
       g.fillStyle = '#57724d';
-      for (let x = -6; x < W + 6; x += 9) {
+      for (let x = -6; x < OW + 6; x += 9) {
         const r = 6 + R() * 5;
         g.beginPath(); g.ellipse(x + 4, baseY + 4, r, r * 0.55, 0, 0, 7); g.fill();
       }
-      p.dither(2, baseY - 8, W - 4, 9, '#6e695f', 0.22, R);
-      p.dither(0, baseY - 2, W, 9, '#4c6344', 0.30, R);
+      p.dither(2, baseY - 8, OW - 4, 9, '#6e695f', 0.22, R);
+      p.dither(0, baseY - 2, OW, 9, '#4c6344', 0.30, R);
       const pine = (x, y) => {
         g.fillStyle = '#2e4b34';
         for (let i = 0; i < 3; i++) {
@@ -1617,16 +1672,38 @@ const SPR = {
         }
         g.fillStyle = '#5d4630'; g.fillRect(x - 0.5, y + 0.5, 1, 2);
       };
-      for (let i = 0; i < 9; i++) pine(4 + R() * (W - 8), baseY + 1 + R() * 5);
+      for (let i = 0; i < 9; i++) pine(4 + R() * (OW - 8), baseY + 1 + R() * 5);
 
       // winding hiking trail up the tallest peak
-      const main = peaks.reduce((a, b) => (a[1] < b[1] ? a : b));
+      const main = opeaks.reduce((a, b) => (a[1] < b[1] ? a : b));
       g.strokeStyle = 'rgba(214,199,164,0.55)'; g.lineWidth = 1;
       g.beginPath();
-      g.moveTo(main[0] + 16, H - 8);
-      g.quadraticCurveTo(main[0] - 18, H - 34, main[0] + 10, H - 52);
+      g.moveTo(main[0] + 16, OH - 8);
+      g.quadraticCurveTo(main[0] - 18, OH - 34, main[0] + 10, OH - 52);
       g.quadraticCurveTo(main[0] + 20, main[1] + 26, main[0], main[1] + 6);
       g.stroke();
+      g.restore();
+
+      // dissolve the massif into the meadow: mossy speckle spilling past the
+      // base, and a low atmospheric haze so it recedes into the landscape
+      const R2 = mulberry32(8800 + v * 97);
+      const meadow = ['#6a9c4a', '#75ab52', '#57724d', '#4c6344'];
+      for (let i = 0; i < W * 3; i++) {
+        const bx = R2() * W;
+        const by = H - 2 - R2() * R2() * 36; // densest right at the base
+        g.fillStyle = meadow[(i + v) % 4];
+        g.globalAlpha = 0.3 + R2() * 0.45;
+        g.fillRect(bx, by, 1 + R2() * 2, 1 + R2());
+      }
+      g.globalAlpha = 1;
+      const hazeGrad = g.createLinearGradient(0, H - EX * 0.85, 0, H);
+      hazeGrad.addColorStop(0, 'rgba(169,180,191,0)');
+      hazeGrad.addColorStop(0.6, 'rgba(169,180,191,0.15)');
+      hazeGrad.addColorStop(1, 'rgba(140,165,140,0.05)');
+      g.globalCompositeOperation = 'source-atop'; // haze tints the massif only
+      g.fillStyle = hazeGrad;
+      g.fillRect(0, H - EX * 0.85, W, EX * 0.85);
+      g.globalCompositeOperation = 'source-over';
 
       this.mountains.push({ img: p.c, oy: EX, peaks });
     }
@@ -1674,6 +1751,27 @@ const SPR = {
       tg.fillStyle = col; tg.fillRect(0, 0, S, S);
       this.glowTints[name] = tc;
     }
+    // directional HEADLIGHT BEAM — a soft wedge pointing +x, so vehicle
+    // lights sweep the road ahead instead of glowing like street lamps
+    const BW = 64, BH = 32;
+    const [bc, bg] = mkCanvas(BW, BH);
+    const bgrad = bg.createLinearGradient(0, 0, BW, 0);
+    bgrad.addColorStop(0, 'rgba(255,255,255,0.95)');
+    bgrad.addColorStop(0.5, 'rgba(255,255,255,0.35)');
+    bgrad.addColorStop(1, 'rgba(255,255,255,0)');
+    bg.fillStyle = bgrad;
+    bg.beginPath();
+    bg.moveTo(0, BH / 2);
+    bg.lineTo(BW, 0);
+    bg.lineTo(BW, BH);
+    bg.closePath();
+    bg.fill();
+    this.beam = bc;
+    const [btc, btg] = mkCanvas(BW, BH); // pre-tinted cool-white for the colour pass
+    btg.drawImage(bc, 0, 0);
+    btg.globalCompositeOperation = 'source-in';
+    btg.fillStyle = '#cfe2ff'; btg.fillRect(0, 0, BW, BH);
+    this.beamTint = btc;
   },
 
   makeLamp() {
@@ -1818,6 +1916,11 @@ const SPR = {
     };
     this.trainExpress = mkExpress();
     this.expressCoach = mkTrain('#dde2ea', false);
+    // the wider fleet: orange rush-hour commuter & the deep-blue night sleeper
+    this.commuterEngine = mkTrain('#e08a3c', true);
+    this.commuterCoach = mkTrain('#e8b93c', false);
+    this.nightEngine = mkTrain('#4a4478', true);
+    this.nightCoach = mkTrain('#5d548e', false);
     // freight: dark engine + flatcars loaded with crates
     this.freightEngine = mkTrain('#4a4f58', true);
     const mkFreight = () => {

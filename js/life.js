@@ -450,19 +450,24 @@ const Life = {
               // Each service runs on its OWN track of the three-track mainline
               // (lane = px offset onto its rails), so trains never overlap.
               const mk = (type, speed, cars, prog) => ({
-                route, stopIdx: type === 'local' ? stopIdx : [0, route.length - 1],
+                route, stopIdx: (type === 'local' || type === 'commuter') ? stopIdx : [0, route.length - 1],
                 prog: prog || 0, dir: 1, pause: 8, type, speed, cars, lastStop: -1,
-                lane: type === 'express' ? -5 : type === 'freight' ? 5 : 0,
+                lane: (type === 'express' || type === 'nightliner') ? -5 : type === 'freight' ? 5 : 0,
                 x: route[0][0] * T + 8, y: route[0][1] * T + 8, dirx: 1, diry: 0,
               });
-              this.trains.push(mk('local', 4.2, 3, 0));
-              if (served >= 3 && route.length > 26) this.trains.push(mk('express', 6.4, 2, (route.length - 1) * 0.5));
-              if (industry && route.length > 18) this.trains.push(mk('freight', 3.1, 4, (route.length - 1) * 0.82));
+              // a real fleet, LONG consists — each track carries one service
+              // at a time thanks to the timetable (see serviceWindow):
+              //   centre track: local (midday/weekend) + commuter (rush hours)
+              //   fast track:   express (day) + nightliner (the sleeper)
+              //   goods track:  freight, round the clock
+              this.trains.push(mk('local', 4.2, 5, 0));
+              this.trains.push(mk('commuter', 4.6, 3, (route.length - 1) * 0.3));
+              if (served >= 3 && route.length > 26) this.trains.push(mk('express', 6.4, 4, (route.length - 1) * 0.5));
+              if (route.length > 26) this.trains.push(mk('nightliner', 3.8, 6, (route.length - 1) * 0.7));
+              if (industry && route.length > 18) this.trains.push(mk('freight', 3.1, 7, (route.length - 1) * 0.82));
               if (!hadTrain || served > 2) {
-                const extra = [];
-                if (this.trains.some(t2 => t2.type === 'express')) extra.push('an express');
-                if (this.trains.some(t2 => t2.type === 'freight')) extra.push('a freight run');
-                this.say(`🚂 All aboard! The railway serves ${served} station${served > 1 ? 's' : ''}${extra.length ? ' — plus ' + extra.join(' and ') : ''}.`);
+                const names = { local: 'the all-stops local', commuter: 'a rush-hour commuter', express: 'an express', nightliner: 'the night sleeper', freight: 'a freight run' };
+                this.say(`🚂 All aboard! The railway serves ${served} station${served > 1 ? 's' : ''} with ${this.trains.map(t2 => names[t2.type]).join(', ')}.`);
               }
             }
           } else if (railless) {
@@ -474,6 +479,11 @@ const Life = {
       }
     }
     for (const tr of this.trains) {
+      // the timetable: outside its window a service is stabled at the
+      // terminus (hidden), so two services never share a track at once
+      const active = this.serviceWindow(tr.type);
+      tr.hidden = !active;
+      if (!active) { tr.prog = 0; tr.dir = 1; tr.pause = 2; tr.lastStop = 0; continue; }
       if (tr.pause > 0) { tr.pause -= gm; continue; }
       tr.prog += (tr.speed || 4.2) * dt * tr.dir;
       if (tr.prog >= tr.route.length - 1) { tr.prog = tr.route.length - 1; tr.dir = -1; tr.pause = 12; tr.lastStop = tr.route.length - 1; }
@@ -1467,11 +1477,24 @@ const Life = {
     this.cooldown = 380 + Math.random() * 400;
   },
 
+  /* which service runs when — one train per track at any moment */
+  serviceWindow(type) {
+    const c = Sim.clock;
+    switch (type) {
+      case 'local': return Sim.isWeekend() || (c >= 600 && c < 960);              // midday & weekends
+      case 'commuter': return !Sim.isWeekend() && ((c >= 390 && c < 600) || (c >= 960 && c < 1200)); // rush hours
+      case 'express': return c >= 540 && c < 1260;                                 // daytime dash
+      case 'nightliner': return c >= 1290 || c < 360;                              // the sleeper
+      default: return true;                                                        // freight never sleeps
+    }
+  },
+
   /* is any train within r tiles of this spot? (level-crossing gates ask)
      A train dwelling at a station platform doesn't keep distant gates
      down for the whole stop — only one actually ON the crossing does. */
   trainNearTile(x, y, r) {
     for (const tr of this.trains) {
+      if (tr.hidden) continue; // stabled services don't hold gates
       const d = Math.abs(tr.x / T - x) + Math.abs(tr.y / T - y);
       if (d >= r) continue;
       if (tr.pause > 3 && d > 2.5) continue;
