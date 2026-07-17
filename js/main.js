@@ -1637,8 +1637,8 @@ function placeAt(x, y) {
       afterMapEdit(); break;
     case 'bulldoze': {
       const r = World.bulldoze(x, y);
-      if (r && r.kind === 'building') { Sim.onBuildingRemoved(r.b); toast(`${CAT[r.b.type].name} demolished 🚜`); }
-      if (r) { afterMapEdit(); Snd.crunch(); }
+      if (r && r.kind === 'building') { Sim.onBuildingRemoved(r.b); toast(`${CAT[r.b.type].name} demolished 🚜 — Ctrl+Z to undo`); }
+      if (r) { recordBulldoze(r, x, y); afterMapEdit(); Snd.crunch(); }
       break;
     }
   }
@@ -1748,12 +1748,13 @@ window.addEventListener('keydown', e => {
   if (e.key === 'ArrowDown' || e.key === 's') UI.camY += pan;
   if (e.key === 'Escape') {
     setTool(null); hideInfo();
-    for (const id of ['settings', 'saveui', 'statsui'])
+    for (const id of ['settings', 'saveui', 'statsui', 'newmap'])
       document.getElementById(id).style.display = 'none';
   }
   if (e.key === ' ') { e.preventDefault(); setSpeed(UI.speedIdx === 0 ? 1 : 0); }
   if (e.key >= '1' && e.key <= '4') setSpeed(+e.key - 1);
   if (e.key === 'h' || e.key === 'H') toggleSidebar();
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undoBulldoze(); }
   clampCam();
 });
 
@@ -2091,9 +2092,10 @@ function showInfo(b) {
     showInfo(b);
   };
   document.getElementById('demolish').onclick = () => {
+    recordBulldoze({ kind: 'building', b }, b.x, b.y);
     World.removeBuilding(b); Sim.onBuildingRemoved(b);
     afterMapEdit(); hideInfo(); UI.selected = null;
-    toast(`${d.name} demolished 🚜`);
+    toast(`${d.name} demolished 🚜 — Ctrl+Z to undo`);
   };
   document.getElementById('info-close').onclick = hideInfo;
   wirePersonLinks(el);
@@ -2357,15 +2359,27 @@ document.addEventListener('visibilitychange', () => {
       typeof Settings !== 'undefined' && Settings.get('autosaveMin')) writeSave(AUTOSAVE_KEY, true);
 });
 function newMap() {
-  if (!confirm('Start a fresh map? Unsaved progress is lost.')) return;
-  const nm = (prompt('Name your new village:', 'PixelVille') || 'PixelVille').trim();
+  document.getElementById('nm-name').value = 'PixelVille';
+  document.getElementById('newmap').style.display = 'flex';
+}
+function startNewMap() {
+  const nm = (document.getElementById('nm-name').value || 'PixelVille').trim() || 'PixelVille';
+  const scId = document.getElementById('nm-mode').value;
+  document.getElementById('newmap').style.display = 'none';
   World.genStarterMap();
   Sim.reset(); Life.reset(); if (typeof Gov !== 'undefined') Gov.reset();
   if (typeof Calamity !== 'undefined') Calamity.reset();
   if (typeof Festivals !== 'undefined') Festivals.reset();
   Weather.init();
-  setVillageName(nm || 'PixelVille');
+  setVillageName(nm);
+  UI.undoStack = [];
   hideInfo(); UI.selected = null;
+  if (scId !== 'sandbox' && typeof SCENARIOS !== 'undefined' && SCENARIOS[scId]) {
+    Sim.scenario = { id: scId, startDay: Sim.day, done: false, failed: false, zeroDays: 0 };
+    const def = SCENARIOS[scId];
+    if (typeof Tasks !== 'undefined') Tasks.add('scenario', def.emoji, `Scenario: ${def.desc}`);
+    toast(`🎯 Scenario: ${def.name} — ${def.desc}. Good luck!`);
+  }
   toast(`New land discovered 🗺️ — drop a house and found ${World.name}!`);
 }
 
@@ -2493,6 +2507,46 @@ function resize() {
   clampCam();
 }
 
+/* =============== bulldoze undo (Ctrl+Z) ===============
+   Every bulldozed tile is remembered; Ctrl+Z restores the most recent.
+   A rebuilt home comes back empty and a fresh family soon moves in. */
+function recordBulldoze(r, x, y) {
+  UI.undoStack = UI.undoStack || [];
+  const entry = { kind: r.kind, x, y };
+  if (r.kind === 'building') {
+    const b = r.b;
+    entry.type = b.type; entry.bx = b.x; entry.by = b.y;
+    entry.level = b.level; entry.funds = Math.round(b.funds);
+  }
+  UI.undoStack.push(entry);
+  if (UI.undoStack.length > 40) UI.undoStack.shift();
+}
+function undoBulldoze() {
+  const e = (UI.undoStack || []).pop();
+  if (!e) { toast('Nothing to undo'); return; }
+  switch (e.kind) {
+    case 'road': World.setRoad(e.x, e.y); break;
+    case 'rail': World.setRail(e.x, e.y); break;
+    case 'tree': World.placeTree(e.x, e.y); break;
+    case 'water': {
+      const i = World.idx(e.x, e.y);
+      if (!World.bmap[i] && !World.roadMap[i]) { World.ground[i] = G_WATER; World.waterStamp++; World.dirty = true; }
+      break;
+    }
+    case 'rock': toast('A levelled mountain stays levelled — some things can\'t be undone'); return;
+    case 'building': {
+      const b = World.placeBuilding(e.type, e.bx, e.by, true);
+      if (!b) { toast('The plot is blocked now — couldn\'t rebuild'); return; }
+      b.level = e.level || 1;
+      for (const m of Sim.onBuildingAdded(b)) toast(m);
+      b.funds = e.funds || b.funds;
+      break;
+    }
+  }
+  afterMapEdit();
+  toast('↩️ Bulldoze undone');
+}
+
 /* =============== village name & settings panel =============== */
 function setVillageName(name) {
   World.name = name.slice(0, 24);
@@ -2600,6 +2654,9 @@ function boot() {
     e.target.value = '';
   });
   document.getElementById('btn-new').addEventListener('click', newMap);
+  document.getElementById('nm-start').addEventListener('click', startNewMap);
+  document.getElementById('nm-cancel').addEventListener('click', () =>
+    document.getElementById('newmap').style.display = 'none');
   const sb = document.getElementById('btn-sound');
   sb.textContent = Snd.enabled ? '🔊' : '🔇';
   sb.addEventListener('click', () => { Snd.start(); sb.textContent = Snd.toggle() ? '🔊' : '🔇'; });

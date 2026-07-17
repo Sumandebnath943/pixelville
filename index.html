@@ -121,6 +121,24 @@
       </div>
     </div>
 
+    <div id="newmap" class="modal">
+      <div class="modal-card">
+        <h1>🗺️ Found a new village</h1>
+        <div class="set-row"><label>Village name</label><input id="nm-name" maxlength="24" spellcheck="false" value="PixelVille"></div>
+        <div class="set-row"><label>Mode</label>
+          <select id="nm-mode">
+            <option value="sandbox">Sandbox — no goals, just life</option>
+            <option value="first100">💯 The First Hundred — reach 100 residents</option>
+            <option value="railage">🚂 The Rail Age — get trains running</option>
+            <option value="festive">🕯️ A Year Without Loss — 28 days, no building lost</option>
+          </select></div>
+        <div class="set-row" style="justify-content:flex-end; gap:8px">
+          <button id="nm-cancel">Cancel</button>
+        </div>
+        <button id="nm-start">Found the village ▶</button>
+      </div>
+    </div>
+
     <div id="statsui" class="modal">
       <div class="modal-card">
         <h1>📈 Village history</h1>

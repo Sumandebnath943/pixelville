@@ -34,6 +34,15 @@ node server.js        # → http://localhost:8123
 - **Community spirit** 🤝: when town hall ignores a real need for days, villagers pool their savings and build it themselves — fire stations and police fastest, then schools, homes, shops, parks. After a fire or collapse, neighbours rush to the site, emergency crews roll out, the street clears the rubble together, and the community rebuilds.
 - **Personal ambitions & feelings**: every adult has a lifestyle — steady workers, shopkeepers saving for their own café, entrepreneurs, and a few risk-takers who may resort to petty theft (and face arrest). Founders buy a plot, build their shop, and quit the day job. Every villager also carries a **mood** shaped by work, savings, safety, fun and misfortune — it shows on their faces in the street, colours their ballot, decides who joins a protest, and feeds the town happiness stat.
 - **Idle progress**: leave the game open and the village keeps governing, saving, building, and growing on its own — slowly and steadily (a day lasts ~6 real minutes at 1×), even while the tab is in the background.
+- **Meet anyone** 🪪: click any villager walking the streets (or a name in a building card) for their whole story — age, mood, job and wage, savings, loans, closest friend, favourite haunt, and their last few memories. A golden ring follows whoever you're watching.
+- **Village tiers** 📜: Hamlet → Village → Town → City → Metropolis. Each new charter is a named celebration with fireworks, and the HUD chip tracks progress to the next.
+- **The mayor's report** 🎩: click the leadership chip for who governs, what they promised, what they actually built, what's on the desk — and set the **tax policy** (low/normal/high) yourself: heavier taxes fund bigger projects but sour the streets.
+- **History charts** 📈: population, happiness, safety, wealth and treasury, sampled daily and drawn as a chronicle of the village's whole life.
+- **Real saves** 💾: three named slots plus a rolling autosave — and every villager, friendship, memory, business and the mayor survive the round-trip. Export the whole village to a file and share it, or import one back.
+- **Scenario mode** 🎯 (optional at new-map time): The First Hundred, The Rail Age, or A Year Without Loss — with a real win celebration and a real way to lose (an abandoned village is a lost one). Sandbox stays the default.
+- **Disasters that escalate**: unattended fires leap to the neighbours, earthquakes rupture gas lines, floods wash out roads (road crews relay them), and droughts halve farm pay and beach the fishing fleet.
+- **Undo** ↩️: Ctrl+Z takes back a bulldoze — wrong clicks aren't forever.
+- **Settings** ⚙️: growth pace (Cozy / Normal / Bustling), how much of Christmas locks fast-forward, sound volume, autosave cadence, and renaming your village.
 - **Airport** ✈️: place one and planes take off and land on the runway; flights bring extra visitors to town.
 - **Surprises**: hot-air balloons, shooting stars, rainbows after rain, and unexplained lights in the night sky.
 - **SimCity-style HUD**: minimap (click to jump), R/C/I demand meters, city wealth readout, cast building shadows.
@@ -49,12 +58,16 @@ node server.js        # → http://localhost:8123
 | Cancel tool | right-click or `Esc` |
 | Inspect building | click it (residents, jobs, visitors, demolish) |
 | Pause / speeds | space, or keys `1–4`, or the ⏸▶⏩⏭ buttons |
-| Save / Load / New map | 💾 📂 🗺️ buttons (saves to browser localStorage) |
+| Inspect a villager | click them in the street (or a name in any card) |
+| Undo bulldoze | `Ctrl+Z` |
+| Save / Load / New map | 💾 📂 🗺️ buttons (3 slots + autosave + file export/import) |
+| History / Settings | 📈 ⚙️ buttons |
 
 ## Architecture
 
 | File | Role |
 | --- | --- |
+| `js/settings.js` | Player settings (growth pace, festival speed lock, volume, autosave), persisted globally |
 | `js/sprites.js` | Procedural pixel-art generator + the `CAT` catalog (footprints, jobs, opening hours, draw functions for 30+ building types), seasonal tiles/trees, auto snow-caps, glow sprites |
 | `js/world.js` | 128×128 tile grid, terrain stamps (river/lake/mountain/forest), building placement, **auto-road A\*** (terrain costs + turn penalty), road-network BFS for trips, save/load |
 | `js/weather.js` | Season cycle, weather state machine, rain/snow/leaf particles, puddles, cloud shadows, lightning |

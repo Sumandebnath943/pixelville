@@ -92,6 +92,26 @@ const GIVEN_NAMES = ['Asha', 'Maya', 'Ishan', 'Noor', 'Dev', 'Elena', 'Farah', '
 /* the arc of a life, in years — a year passes each in-game day */
 const AGE_ADULT = 18, AGE_RETIRE = 65, AGE_FRAIL = 70;
 
+/* optional scenario goals for a new map — sandbox remains the default */
+const SCENARIOS = {
+  first100: {
+    name: 'The First Hundred', emoji: '💯',
+    desc: 'Grow the village to 100 residents',
+    check: () => Sim.people.length >= 100,
+  },
+  railage: {
+    name: 'The Rail Age', emoji: '🚂',
+    desc: 'Open a railway with trains running between stations',
+    check: () => typeof Life !== 'undefined' && Life.trains.length > 0,
+  },
+  festive: {
+    name: 'A Year Without Loss', emoji: '🕯️',
+    desc: 'Survive one full year (28 days) without a single building lost',
+    check: () => Sim.scenario && Sim.day - Sim.scenario.startDay >= 28,
+    failIf: () => World.buildings.some(b => b.ruined),
+  },
+};
+
 /* the village's climb: each tier is a named celebration when first reached */
 const TIERS = [
   { pop: 0, name: 'Hamlet', emoji: '🛖' },
@@ -517,6 +537,7 @@ const Sim = {
       this.dailyEconomy();
       this.recordHistory();
       this.checkTier();
+      this.checkScenario();
       // Government decisions happen after families have earned, saved, and
       // made their own plans for the day.
       if (typeof Gov !== 'undefined') Gov.dayTick();
@@ -644,6 +665,7 @@ const Sim = {
     }
 
     this.tickRomance(say);
+    this.tickSeparations(say);
     this.tickBirths(say);
   },
 
@@ -697,6 +719,37 @@ const Sim = {
           Life.celebrate(venue.x * T + venue.w * 8, venue.y * T + venue.h * 16, '#f2b8cc');
         // newlyweds with savings look for a place of their own
         if (p.home.residents.length > 4) this.seekNewHome(p, q, say);
+      }
+    }
+  },
+
+  /* love can fray: a couple both miserable for days on end may part ways */
+  tickSeparations(say) {
+    for (const p of this.people) {
+      if (!p.married || !p.partnerId || p.kind === 'kid') continue;
+      const q = this.people.find(o => o.id === p.partnerId);
+      if (!q || q.id < p.id) continue; // handle each couple once
+      const rocky = (p.mood !== undefined && p.mood < 28) && (q.mood !== undefined && q.mood < 28);
+      p.rockyDays = rocky ? (p.rockyDays || 0) + 1 : 0;
+      if (p.rockyDays >= 4 && Math.random() < 0.3) {
+        p.rockyDays = 0;
+        p.partnerId = null; q.partnerId = null; p.married = q.married = false;
+        p.mood = Math.max(5, p.mood - 8); q.mood = Math.max(5, q.mood - 8);
+        if (typeof Mind !== 'undefined') {
+          Mind.remember(p, 'heartbreak', `separated from ${this.fullName(q)}`, -2);
+          Mind.remember(q, 'heartbreak', `separated from ${this.fullName(p)}`, -2);
+        }
+        const mover = Math.random() < 0.5 ? p : q;
+        const vacant = World.buildings.find(b => CAT[b.type].res === 'family' && !b.ruined &&
+          !b.construction && b.connected && b.residents.length === 0);
+        if (vacant) {
+          this.moveHomes(mover, vacant);
+          vacant.funds = Math.max(vacant.funds, 20);
+          say(`💔 ${this.fullName(p)} and ${this.fullName(q)} have separated — ${mover.name} moved across town`);
+        } else {
+          say(`💔 ${this.fullName(p)} and ${this.fullName(q)} have separated — ${mover.name} left the village for a fresh start`);
+          this.removePerson(mover, true);
+        }
       }
     }
   },
@@ -809,7 +862,8 @@ const Sim = {
         b.funds -= 190; b.boat = true;
         say(`🛶 The ${name}s bought a fishing boat — fresh catch and a little extra income`);
       }
-      if (b.boat && typeof Weather !== 'undefined' && Weather.season !== 3) {
+      if (b.boat && typeof Weather !== 'undefined' && Weather.season !== 3 &&
+          (typeof Calamity === 'undefined' || Calamity.droughtLevel < 0.5)) {
         const haul = 3 + Math.random() * 8;
         b.funds += haul;
         if (Math.random() < 0.02) say(`🎣 A great haul! The ${name}s sold $${Math.round(haul + 10)} of fish at the market`);
@@ -1427,7 +1481,9 @@ const Sim = {
           }
           if (dest === p.work && p.paidDay !== this.day) { // payday
             p.paidDay = this.day;
-            const wage = (WAGES[dest.type] || 15) * (p.wageMult || 1);
+            let wage = (WAGES[dest.type] || 15) * (p.wageMult || 1);
+            // parched fields yield half a day's pay
+            if (dest.type === 'farm' && typeof Calamity !== 'undefined' && Calamity.droughtLevel >= 0.6) wage *= 0.5;
             // Each adult keeps a small personal fund for their own ambitions;
             // the rest still supports the household.
             const personal = wage * (p.savingsRate === undefined ? 0.2 : p.savingsRate);
@@ -1614,6 +1670,40 @@ const Sim = {
     if (typeof Tasks !== 'undefined') Tasks.log(`${t.emoji} ${World.name} reached ${t.name} status (${this.people.length} residents)`);
     if (typeof Snd !== 'undefined') Snd.fanfare();
     for (const p of this.people) p.mood = Math.min(98, (p.mood === undefined ? 60 : p.mood) + 6);
+  },
+
+  /* ---------- scenario mode: goals with a real win — and a real loss ---------- */
+  checkScenario() {
+    const sc = this.scenario;
+    if (!sc || sc.done || sc.failed) return;
+    const def = SCENARIOS[sc.id];
+    if (!def) { this.scenario = null; return; }
+    const say = m => { if (typeof Life !== 'undefined') Life.say(m); };
+    // abandonment: a founded village with nobody left for a week is lost
+    sc.zeroDays = (this.firstFamilyDone && this.people.length === 0) ? (sc.zeroDays || 0) + 1 : 0;
+    if (sc.zeroDays >= 7) {
+      sc.failed = true;
+      say(`🥀 ${World.name} stands empty — after seven silent days, the scenario is LOST. The map lives on as a sandbox.`);
+      if (typeof News !== 'undefined') News.breaking(`${World.name} abandoned — scenario failed`);
+      if (typeof Tasks !== 'undefined') Tasks.done('scenario', false, `Scenario failed: ${def.desc} (village abandoned)`);
+      return;
+    }
+    if (def.failIf && def.failIf()) {
+      sc.failed = true;
+      say(`💔 Scenario LOST: ${def.name} — a building was lost. The village carries on in sandbox spirit.`);
+      if (typeof Tasks !== 'undefined') Tasks.done('scenario', false, `Scenario failed: ${def.desc}`);
+      return;
+    }
+    if (def.check()) {
+      sc.done = true;
+      const c = typeof Gov !== 'undefined' ? Gov.townCenter() : { x: GW >> 1, y: GH >> 1 };
+      say(`🏆 SCENARIO COMPLETE: ${def.emoji} ${def.name}! ${World.name} did it — the celebration lasts all night.`);
+      if (typeof News !== 'undefined') News.breaking(`SCENARIO COMPLETE — ${def.name}! ${World.name} celebrates`);
+      if (typeof Tasks !== 'undefined') Tasks.done('scenario', true, `Scenario complete: ${def.name}`);
+      if (typeof Life !== 'undefined') Life.celebrate(c.x * T, c.y * T, '#ffd160');
+      if (typeof Snd !== 'undefined') Snd.fanfare();
+      for (const p of this.people) p.mood = Math.min(98, (p.mood === undefined ? 60 : p.mood) + 10);
+    }
   },
 
   /* ---------- save / load: the people themselves ----------

@@ -206,6 +206,32 @@ const Life = {
     this.say(`🚒 Fire brigade dispatched from the ${CAT[best.type].name}!`);
     return true;
   },
+  /* set a building alight with the full emergency response — used by random
+     ignition, spreading flames and earthquake gas ruptures alike */
+  igniteBuilding(b, causeMsg) {
+    if (!b || b.fire || b.ruined || b.construction) return false;
+    // Fires are emergencies, not an instant demolition timer.  A building
+    // has time for a truck to cross town, and neighbours can still limit
+    // the damage when the village has not built a station yet.
+    b.fire = 1; b.fireT = 300 + Math.random() * 120;
+    b.fireNoStationAnnounced = false; b.fireDispatchRetry = 0;
+    this.firesRecent = (this.firesRecent || 0) + 1;
+    for (const r of b.residents) {
+      r.mood = Math.max(5, (r.mood === undefined ? 60 : r.mood) - 15); // shock
+      if (typeof Mind !== 'undefined') Mind.remember(r, 'fire', 'watched their home catch fire', -2, b.id);
+    }
+    if (b.ownerId) { // the owner family takes it hard too
+      const oh = World.buildings.find(o => o.id === b.ownerId);
+      if (oh) for (const r of oh.residents) r.mood = Math.max(5, (r.mood === undefined ? 60 : r.mood) - 10);
+    }
+    this.say(causeMsg || `🔥 Fire at the ${CAT[b.type].name}!`, { x: b.x * T + b.w * 8, y: b.y * T + b.h * 8 });
+    if (typeof Tasks !== 'undefined') Tasks.add('fire' + b.id, '🔥', `Put out the fire at the ${CAT[b.type].name}`);
+    if (typeof Snd !== 'undefined') Snd.siren();
+    this.dispatchFire(b, true);
+    this.coverStory(b.x * T + b.w * 8, (b.y + b.h) * T, b, `Fire at the ${CAT[b.type].name} — crews responding`);
+    return true;
+  },
+
   tickFires(dt) {
     const gm = dt * MIN_PER_SEC;
     this.firesRecent = Math.max(0, (this.firesRecent || 0) - gm / 7200); // memory fades over ~5 days
@@ -213,27 +239,7 @@ const Life = {
     for (const b of World.buildings) {
       if (b.fire || b.ruined || b.construction) continue;
       const mult = b.type === 'factory' ? 3 : (b.type === 'restaurant' || b.type === 'bakery') ? 2 : 1;
-      if (Math.random() < 0.000007 * mult * gm) {
-        // Fires are emergencies, not an instant demolition timer.  A building
-        // has time for a truck to cross town, and neighbours can still limit
-        // the damage when the village has not built a station yet.
-        b.fire = 1; b.fireT = 300 + Math.random() * 120;
-        b.fireNoStationAnnounced = false; b.fireDispatchRetry = 0;
-        this.firesRecent = (this.firesRecent || 0) + 1;
-        for (const r of b.residents) {
-          r.mood = Math.max(5, (r.mood === undefined ? 60 : r.mood) - 15); // shock
-          if (typeof Mind !== 'undefined') Mind.remember(r, 'fire', 'watched their home catch fire', -2, b.id);
-        }
-        if (b.ownerId) { // the owner family takes it hard too
-          const oh = World.buildings.find(o => o.id === b.ownerId);
-          if (oh) for (const r of oh.residents) r.mood = Math.max(5, (r.mood === undefined ? 60 : r.mood) - 10);
-        }
-        this.say(`🔥 Fire at the ${CAT[b.type].name}!`, { x: b.x * T + b.w * 8, y: b.y * T + b.h * 8 });
-        if (typeof Tasks !== 'undefined') Tasks.add('fire' + b.id, '🔥', `Put out the fire at the ${CAT[b.type].name}`);
-        if (typeof Snd !== 'undefined') Snd.siren();
-        this.dispatchFire(b, true);
-        this.coverStory(b.x * T + b.w * 8, (b.y + b.h) * T, b, `Fire at the ${CAT[b.type].name} — crews responding`);
-      }
+      if (Math.random() < 0.000007 * mult * gm) this.igniteBuilding(b);
     }
     // burn down
     for (const b of World.buildings) {
@@ -244,6 +250,15 @@ const Life = {
       if (b.fireDispatchRetry <= 0 && !this.dispatchFire(b, false)) {
         b.fireDispatchRetry = 90;
         this.formBucket(b); // no truck coming — neighbours run over themselves
+      }
+      // flames LEAP: a blaze burning with no truck on scene can catch the
+      // neighbours — fire is a real threat to a dense street now
+      if (Math.random() < 0.0009 * gm &&
+          !this.fireTrucks.some(u => u.target === b && u.phase === 'douse') &&
+          World.buildings.filter(q => q.fire).length < 3) {
+        const near = World.buildings.find(q => q !== b && !q.fire && !q.ruined && !q.construction &&
+          Math.abs(q.x - b.x) < b.w + 3 && Math.abs(q.y - b.y) < b.h + 3);
+        if (near) this.igniteBuilding(near, `🔥 The flames LEAPT to the ${CAT[near.type].name} next door!`);
       }
       b.fireT -= gm;
       if (b.fireT <= 0) {

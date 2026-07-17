@@ -534,6 +534,7 @@ const Gov = {
     this.campaignTick(); // rallies during the campaign week; the vote on election day
     // Communities still help each other before a formal government exists.
     this.communityTick();
+    this.repairRoads();
     if (!this.leader) return;
     if (!this.leaderStillLivesHere()) {
       this.forceResign('after leaving the village');
@@ -918,6 +919,23 @@ const Gov = {
     return false;
   },
 
+  /* road crews relay streets to buildings that lost their access — washed-out
+     floods, careless bulldozing: the village doesn't leave anyone cut off */
+  repairRoads() {
+    if (Sim.people.length < 8) return;
+    let fixed = 0;
+    for (const b of World.buildings) {
+      if (fixed >= 2) break;
+      if (b.connected || b.ruined || b.construction) continue;
+      if (!(b.residents.length || b.workers.length)) continue;
+      if (World.connectRoad(b)) { b.connected = true; fixed++; }
+    }
+    if (fixed) {
+      World.dirty = true;
+      this.say(`🚧 Road crews relaid the street${fixed > 1 ? 's' : ''} to ${fixed} cut-off building${fixed > 1 ? 's' : ''}.`);
+    }
+  },
+
   communityBuild(need, urgent) {
     if (this.countOf(need) >= this.civicCap(need)) return false; // the hard rule
     const cost = CIVIC_COSTS[need] || STARTUP_COSTS[need] || 220;
@@ -932,7 +950,16 @@ const Gov = {
     if (fromTreasury + pool < cost * (urgent ? 1.0 : 1.1)) return false; // a poor village needs time to save
     const target = COVERAGE_RADIUS[need] && this.hasPlanned(need) ? this.coverageGap(need) : null;
     const spot = World.findPlannedSpot(need, target);
-    if (!spot) return false;
+    if (!spot) {
+      // the map is genuinely full for this footprint — tell the player once
+      // instead of silently retrying forever
+      this._noRoom = this._noRoom || {};
+      if ((this.needTimers[need] || 0) >= 8 && !this._noRoom[need]) {
+        this._noRoom[need] = true;
+        this.say(`🚧 There's no room left to build a ${CAT[need].name.toLowerCase()} — clear some space or extend the roads.`);
+      }
+      return false;
+    }
     const b = World.placeBuilding(need, spot.x, spot.y);
     if (!b) return false;
     this.treasury -= fromTreasury;
@@ -944,6 +971,7 @@ const Gov = {
       home.funds -= share;
       due -= share;
     }
+    if (this._noRoom) this._noRoom[need] = false; // space was found after all
     World.refreshConnections();
     // close the task book entry NOW — the timers reset below, so the timer-gated
     // check in communityTick can never fire for a need the community just met

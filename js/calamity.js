@@ -75,7 +75,10 @@ const Calamity = {
     const A = this.active;
     if (A && A.type === 'drought') {
       this.droughtLevel = Math.min(1, this.droughtLevel + gm / 2200);
-      if (!this._dryShown && this.droughtLevel >= 0.5) { this._dryShown = true; World.dirty = true; }
+      if (!this._dryShown && this.droughtLevel >= 0.5) {
+        this._dryShown = true; World.dirty = true;
+        this.say('🌾 The fields are baking — farm work pays half wages and the fishing boats sit idle until the rains return.');
+      }
       A.t -= gm;
       A.hurt += gm;
       if (A.hurt > 720) { // twice a day the drought bites
@@ -138,7 +141,9 @@ const Calamity = {
     if (flood.size < 14) return;
     this.flooded = flood;
     this._floodTiles = [...flood];
-    this.active = { type: 'flood', phase: 'rising', t: 500 + Math.random() * 400, drain: 0 };
+    // the water remembers which streets it swallowed — some wash out for good
+    const washout = [...flood].filter(i => World.roadMap[i]);
+    this.active = { type: 'flood', phase: 'rising', t: 500 + Math.random() * 400, drain: 0, washout };
     for (let k = 0; k < 2 + Math.min(5, (flood.size / 30) | 0); k++) {
       const i = this._floodTiles[(Math.random() * this._floodTiles.length) | 0];
       this.rafts.push({ x: (i % GW) * T + 8, y: ((i / GW) | 0) * T + 8, tx: 0, ty: 0, ph: Math.random() * 7, flip: 1 });
@@ -209,6 +214,18 @@ const Calamity = {
       if (F.t <= 0 || !this.flooded.size) {
         this.flooded.clear(); this._floodTiles = null; this.rafts = [];
         for (const b of World.buildings) b.flooded = false;
+        // the receding water leaves scars: a few streets washed out for good
+        const wash = (F.washout || []).filter(i => World.roadMap[i]);
+        const n = Math.min(3, wash.length);
+        for (let k = 0; k < n; k++) {
+          const i = wash.splice((Math.random() * wash.length) | 0, 1)[0];
+          World.roadMap[i] = 0; World.roadStamp++;
+        }
+        if (n) {
+          World.dirty = true;
+          World.refreshConnections();
+          this.say(`🛣️ The flood washed out ${n} stretch${n > 1 ? 'es' : ''} of road — the crews will have to relay them.`);
+        }
         F.over = true;
         this.endEvent();
         for (const p of Sim.people) p.mood = Math.min(98, (p.mood === undefined ? 60 : p.mood) + 6); // pride
@@ -239,6 +256,11 @@ const Calamity = {
     if (typeof Snd !== 'undefined') Snd.crunch();
     for (const p of Sim.people) p.mood = Math.max(5, (p.mood === undefined ? 60 : p.mood) - 12);
     Sim.safety = Math.max(15, Sim.safety - 6);
+    // a ruptured gas line can turn one cracked building into a blaze
+    if (cracked && Math.random() < 0.5 && typeof Life !== 'undefined') {
+      const damaged = World.buildings.find(b => b.quakeDamage && !b.fire && !b.ruined);
+      if (damaged) Life.igniteBuilding(damaged, `🔥 A gas line ruptured in the quake — the ${CAT[damaged.type].name} is on fire!`);
+    }
     this.say(`🫨 EARTHQUAKE! The ground heaved${collapsed ? ` — ${collapsed} building${collapsed > 1 ? 's' : ''} collapsed` : ''}${cracked ? `, ${cracked} more cracked` : ''}. Everyone is out in the streets digging and helping.`);
     this.news('Earthquake rocks the village — neighbours dig through the rubble side by side');
     if (typeof Tasks !== 'undefined') Tasks.add('quake', '🫨', 'Shore up, dig out and rebuild after the earthquake');

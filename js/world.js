@@ -659,8 +659,26 @@ const World = {
     return null;
   },
 
-  /* ---------- trip pathfinding: BFS over the road network ---------- */
+  /* ---------- trip pathfinding: BFS over the road network ----------
+     Commutes repeat the same door-to-door pairs day after day, so results
+     are memoised until the road network changes (roadStamp). Returned
+     arrays are shared — callers must copy before mutating (they all do). */
+  _pathCache: new Map(),
+  _pathCacheStamp: -1,
   roadPath(ax, ay, bx, by) {
+    if (this._pathCacheStamp !== this.roadStamp) {
+      this._pathCacheStamp = this.roadStamp;
+      this._pathCache.clear();
+    }
+    const key = ((ax * GH + ay) * GW + bx) * GH + by;
+    const hit = this._pathCache.get(key);
+    if (hit !== undefined) return hit;
+    const path = this._roadPathRaw(ax, ay, bx, by);
+    if (this._pathCache.size > 600) this._pathCache.clear();
+    this._pathCache.set(key, path);
+    return path;
+  },
+  _roadPathRaw(ax, ay, bx, by) {
     if (!this.isRoad(ax, ay) || !this.isRoad(bx, by)) return null;
     if (ax === bx && ay === by) return [[ax, ay]];
     const prev = new Int32Array(GW * GH).fill(-1);
