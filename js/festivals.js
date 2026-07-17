@@ -32,6 +32,17 @@ const Festivals = {
     this.tree = null; this.lastAnnounce = '';
     this.markets = []; this.carolers = []; this.santa = null; this.sleigh = null;
     this.sleighDay = 0; this.carolT = 0; this._seasonOn = false;
+    if (typeof World !== 'undefined' && World.clearReserved) World.clearReserved();
+  },
+
+  /* mark the ground under the markets (and the great tree's base) as held, so
+     the auto-road planner never runs a street through the festival */
+  reserveGround() {
+    if (typeof World === 'undefined' || !World.reserveRect) return;
+    World.clearReserved();
+    for (const mk of this.markets) World.reserveRect(mk.x, mk.y, 5, 4);
+    if (this.tree && (this.tree.phase === 'raising' || this.tree.phase === 'lit'))
+      World.reserveRect(this.tree.x - 1, this.tree.y - 1, 4, 4);
   },
   say(m) { if (typeof Life !== 'undefined') Life.say(m); },
 
@@ -70,9 +81,12 @@ const Festivals = {
   /* ---------- the Christmas month: markets, carolers, Santa ---------- */
   tickSeason(gm) {
     const on = this.isChristmasSeason() && Sim.people.length >= 8;
-    if (on && !this._seasonOn) { this._seasonOn = true; this.setupMarkets(); }
+    if (on && !this._seasonOn) { this._seasonOn = true; this.setupMarkets(); this.reserveGround(); }
     if (!on) {
-      if (this._seasonOn) { this._seasonOn = false; this.markets = []; this.carolers = []; this.santa = null; this.sleigh = null; }
+      if (this._seasonOn) {
+        this._seasonOn = false; this.markets = []; this.carolers = []; this.santa = null; this.sleigh = null;
+        if (typeof World !== 'undefined' && World.clearReserved) World.clearReserved();
+      }
       return;
     }
     // carol groups move from doorstep to doorstep
@@ -237,8 +251,8 @@ const Festivals = {
       if (tr.phase === 'hauling') {
         if (tr.haulPath && tr.haulPath.length > 1) {
           tr.prog += (gm / (1.6 * 1440)) * tr.haulPath.length; // the haul takes about two days
-          if (tr.prog >= tr.haulPath.length - 1 || yd >= 19) { tr.phase = 'raising'; tr.prog = 0; }
-        } else if (yd >= 19) { tr.phase = 'raising'; tr.prog = 0; }
+          if (tr.prog >= tr.haulPath.length - 1 || yd >= 19) { tr.phase = 'raising'; tr.prog = 0; this.reserveGround(); }
+        } else if (yd >= 19) { tr.phase = 'raising'; tr.prog = 0; this.reserveGround(); }
       }
       if (tr.phase === 'raising') {
         tr.prog = Math.min(1, tr.prog + gm / (2.5 * 1440)); // scaffolds, ladders, tangled lights

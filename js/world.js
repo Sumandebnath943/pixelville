@@ -15,6 +15,7 @@ const World = {
   tree: new Uint8Array(GW * GH),      // 0 none, 1..3 tree variant
   roadMap: new Uint8Array(GW * GH),   // 0/1
   railMap: new Uint8Array(GW * GH),   // 0/1 — railway tracks
+  reserved: new Uint8Array(GW * GH),  // 0/1 — held for festival stalls etc; roads route around
   bmap: new Int16Array(GW * GH),      // building index + 1
   buildings: [],
   mountains: [],                       // {x,y} 3x3 rock + peak sprite
@@ -37,9 +38,24 @@ const World = {
 
   reset() {
     this.ground.fill(0); this.tree.fill(0); this.roadMap.fill(0); this.railMap.fill(0); this.bmap.fill(0);
+    this.reserved.fill(0);
     this.buildings = []; this.mountains = []; this.nextId = 1; this.dirty = true; this.railStamp++;
     this.signals.clear(); this.crossings.clear();
   },
+
+  /* ---------- reserved ground (festival stalls, temporary set-pieces) ----------
+     Auto-roads route around reserved tiles and can't be paved over them, so a
+     Christmas market never ends up with a street running through it. Only open
+     grass is ever reserved, so existing roads are untouched. */
+  reserveRect(x, y, w, h) {
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+      if (!this.inB(x + i, y + j)) continue;
+      const k = this.idx(x + i, y + j);
+      if (this.ground[k] === G_GRASS && !this.roadMap[k] && !this.railMap[k] && !this.bmap[k]) this.reserved[k] = 1;
+    }
+    this.dirty = true;
+  },
+  clearReserved() { this.reserved.fill(0); this.dirty = true; },
 
   /* ---------- initial scenery ---------- */
   genStarterMap(seed) {
@@ -506,6 +522,7 @@ const World = {
     const i = this.idx(x, y);
     if (this.bmap[i]) return Infinity;
     if (this.roadMap[i]) return 0.15;
+    if (this.reserved[i]) return Infinity; // festival ground — roads go around
     const g = this.ground[i];
     if (g === G_ROCK) return Infinity;
     if (g === G_WATER) return 7;
@@ -598,7 +615,7 @@ const World = {
   setRoad(x, y) {
     if (!this.inB(x, y)) return;
     const i = this.idx(x, y);
-    if (this.bmap[i] || this.ground[i] === G_ROCK) return;
+    if (this.bmap[i] || this.ground[i] === G_ROCK || this.reserved[i]) return;
     if (!this.roadMap[i]) this.roadStamp++;
     this.roadMap[i] = 1; this.tree[i] = 0;
     this.dirty = true;

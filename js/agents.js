@@ -1511,12 +1511,29 @@ const Sim = {
       const i = Math.floor(t.prog), f = t.prog - i;
       const [ax, ay] = t.path[i], [bx, by] = t.path[Math.min(i + 1, t.path.length - 1)];
       const dirx = bx - ax, diry = by - ay;
-      // lane offset: vehicles keep right in the carriageway; people walk
-      // out on the footpath itself
-      const off = (t.car || t.taxi || t.moto) ? 3.5 : 6.5;
-      p.x = (ax + (bx - ax) * f) * T + 8 + (diry !== 0 ? (diry > 0 ? -off : off) : 0);
-      p.y = (ay + (by - ay) * f) * T + 8 + (dirx !== 0 ? (dirx > 0 ? off : -off) : 0);
-      p.dirx = dirx; p.diry = diry;
+      // lane offset: vehicles keep right in the carriageway; PEOPLE hug the
+      // footpath — the road edge that faces the grass — so they never trail
+      // down the middle of the avenue where the cars run
+      let ox = 0, oy = 0;
+      if (t.car || t.taxi || t.moto) {
+        const off = 3.5;
+        ox = diry !== 0 ? (diry > 0 ? -off : off) : 0;
+        oy = dirx !== 0 ? (dirx > 0 ? off : -off) : 0;
+      } else {
+        const foot = 6; // how far onto the kerb the pavement sits
+        if (dirx !== 0) { // walking E/W → sidewalk is the north or south kerb
+          const nOpen = !World.isRoad(ax, ay - 1), sOpen = !World.isRoad(ax, ay + 1);
+          oy = (nOpen && !sOpen) ? -foot : (sOpen && !nOpen) ? foot : (dirx > 0 ? foot : -foot);
+        } else if (diry !== 0) { // walking N/S → sidewalk is the west or east kerb
+          const wOpen = !World.isRoad(ax - 1, ay), eOpen = !World.isRoad(ax + 1, ay);
+          ox = (wOpen && !eOpen) ? -foot : (eOpen && !wOpen) ? foot : (diry > 0 ? -foot : foot);
+        }
+      }
+      p.x = (ax + (bx - ax) * f) * T + 8 + ox;
+      p.y = (ay + (by - ay) * f) * T + 8 + oy;
+      // keep the LAST real heading: a zero-length step must never blank the
+      // direction, or a car's headlight beam snaps back to pointing east
+      if (dirx || diry) { p.dirx = dirx; p.diry = diry; }
     }
   },
 

@@ -1753,19 +1753,29 @@ const SPR = {
     }
     // directional HEADLIGHT BEAM — a soft wedge pointing +x, so vehicle
     // lights sweep the road ahead instead of glowing like street lamps
-    const BW = 64, BH = 32;
+    const BW = 64, BH = 34;
     const [bc, bg] = mkCanvas(BW, BH);
+    // a soft wedge: gentle at the lamp, feathering out to nothing — a headlight
+    // pool on the road, not a hard searchlight
     const bgrad = bg.createLinearGradient(0, 0, BW, 0);
-    bgrad.addColorStop(0, 'rgba(255,255,255,0.95)');
-    bgrad.addColorStop(0.5, 'rgba(255,255,255,0.35)');
+    bgrad.addColorStop(0, 'rgba(255,255,255,0.62)');
+    bgrad.addColorStop(0.45, 'rgba(255,255,255,0.24)');
     bgrad.addColorStop(1, 'rgba(255,255,255,0)');
     bg.fillStyle = bgrad;
     bg.beginPath();
     bg.moveTo(0, BH / 2);
-    bg.lineTo(BW, 0);
-    bg.lineTo(BW, BH);
+    bg.lineTo(BW, 1);
+    bg.lineTo(BW, BH - 1);
     bg.closePath();
     bg.fill();
+    // feather the wedge edges so the cone has no hard rim
+    bg.globalCompositeOperation = 'destination-in';
+    const fgrad = bg.createLinearGradient(0, 0, 0, BH);
+    fgrad.addColorStop(0, 'rgba(0,0,0,0)');
+    fgrad.addColorStop(0.5, 'rgba(0,0,0,1)');
+    fgrad.addColorStop(1, 'rgba(0,0,0,0)');
+    bg.fillStyle = fgrad; bg.fillRect(0, 0, BW, BH);
+    bg.globalCompositeOperation = 'source-over';
     this.beam = bc;
     const [btc, btg] = mkCanvas(BW, BH); // pre-tinted cool-white for the colour pass
     btg.drawImage(bc, 0, 0);

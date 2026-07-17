@@ -794,15 +794,15 @@ function render(now) {
         shadow(p.x, p.y + 3, 6, 2);
         if (p.dirx !== 0) ctx.drawImage(spr.h, Math.round(p.x) - 6, Math.round(p.y) - 4);
         else ctx.drawImage(spr.v, Math.round(p.x) - 4, Math.round(p.y) - 6);
-        if (dark > 0.1) { // headlight beam sweeping the road ahead
-          UI.lights.push({ x: p.x + (p.dirx || 0) * 4, y: p.y + (p.diry || 0) * 4, r: 16, a: 0.85, cone: true, dirx: p.dirx, diry: p.diry });
-          UI.lights.push({ x: p.x, y: p.y, r: 6, a: 0.35, tint: 'cool' });
+        if (dark > 0.1 && (p.dirx || p.diry)) { // soft headlight pool on the road ahead
+          UI.lights.push({ x: p.x + (p.dirx || 0) * 4, y: p.y + (p.diry || 0) * 4, r: 15, a: 0.5, cone: true, dirx: p.dirx, diry: p.diry });
+          UI.lights.push({ x: p.x, y: p.y, r: 5, a: 0.2, tint: 'cool' });
         }
       } else if (p.trip.moto) {
         shadow(p.x, p.y + 2.5, 5, 1.6);
         if (p.dirx !== 0) ctx.drawImage(SPR.moto.h, Math.round(p.x) - 5, Math.round(p.y) - 4);
         else ctx.drawImage(SPR.moto.v, Math.round(p.x) - 3, Math.round(p.y) - 5);
-        if (dark > 0.1) UI.lights.push({ x: p.x + (p.dirx || 0) * 3, y: p.y + (p.diry || 0) * 3, r: 10, a: 0.7, cone: true, dirx: p.dirx, diry: p.diry });
+        if (dark > 0.1 && (p.dirx || p.diry)) UI.lights.push({ x: p.x + (p.dirx || 0) * 3, y: p.y + (p.diry || 0) * 3, r: 10, a: 0.45, cone: true, dirx: p.dirx, diry: p.diry });
       } else {
         const spr = SPR.person(p.kind, p.seed);
         shadow(p.x, p.y + 1.5, 3, 1.2);
@@ -897,7 +897,7 @@ function render(now) {
       shadow(tr.x, tr.y + 3, 6, 2);
       if (tr.dirx !== 0) ctx.drawImage(spr.h, Math.round(tr.x) - 6, Math.round(tr.y) - 4);
       else ctx.drawImage(spr.v, Math.round(tr.x) - 4, Math.round(tr.y) - 6);
-      if (dark > 0.1) UI.lights.push({ x: tr.x + (tr.dirx || 0) * 4, y: tr.y + (tr.diry || 0) * 4, r: 15, a: 0.85, cone: true, dirx: tr.dirx, diry: tr.diry });
+      if (dark > 0.1 && (tr.dirx || tr.diry)) UI.lights.push({ x: tr.x + (tr.dirx || 0) * 4, y: tr.y + (tr.diry || 0) * 4, r: 15, a: 0.5, cone: true, dirx: tr.dirx, diry: tr.diry });
     } else if (e.kind === 'bus') {
       const u = e.u;
       shadow(u.x, u.y + 3, 8, 2.4);
@@ -1511,7 +1511,9 @@ function drawNight(dark, z) {
     if (L.cone) { // headlights are BEAMS sweeping ahead, not lamp pools
       ng.save();
       ng.translate(sx, sy);
-      ng.rotate(Math.atan2(L.diry || 0, L.dirx || 1));
+      // NB: dirx must NOT fall back to 1 — a straight-north/south car has
+      // dirx 0, and `|| 1` used to skew its beam 45° off to the east
+      ng.rotate(Math.atan2(L.diry || 0, L.dirx || 0));
       ng.globalAlpha = Math.min(1, L.a * k);
       ng.drawImage(SPR.beam, 0, -sr * 0.55, sr * 2.6, sr * 1.1);
       ng.restore();
@@ -1530,7 +1532,7 @@ function drawNight(dark, z) {
     if (L.cone) {
       ctx.save();
       ctx.translate(sx, sy);
-      ctx.rotate(Math.atan2(L.diry || 0, L.dirx || 1));
+      ctx.rotate(Math.atan2(L.diry || 0, L.dirx || 0)); // no `|| 1` — keeps N/S beams straight
       ctx.globalAlpha = Math.min(0.4, L.a * k * 0.35);
       ctx.drawImage(SPR.beamTint, 0, -sr * 0.5, sr * 2.3, sr);
       ctx.restore();
@@ -2001,8 +2003,14 @@ function toast(msg, at) {
   t.textContent = (at ? '📍 ' : '') + msg;
   if (at) t.addEventListener('click', () => panTo(at.x, at.y));
   wrap.appendChild(t);
-  while (wrap.children.length > 4) wrap.removeChild(wrap.firstChild);
-  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 400); }, at ? 9000 : 6000);
+  // fast-forward fires events in bursts — keep the stack short and let each
+  // one clear quickly so toasts never blanket the screen (the task book keeps
+  // the full record either way). Clickable "jump" toasts always linger.
+  const spd = UI.speeds[UI.speedIdx] || 1;
+  const maxStack = spd >= 8 ? 2 : spd >= 3 ? 3 : 4;
+  while (wrap.children.length > maxStack) wrap.removeChild(wrap.firstChild);
+  const life = at ? 9000 : Math.round(6000 / Math.sqrt(Math.max(1, spd)));
+  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 400); }, life);
 }
 
 function showInfo(b) {
