@@ -26,6 +26,9 @@ const World = {
 
   idx(x, y) { return y * GW + x; },
   inB(x, y) { return x >= 0 && y >= 0 && x < GW && y < GH; },
+  /* traffic-signal phase runs on REAL time (8s each way) so lights read as
+     lights at every game speed instead of strobing under fast-forward */
+  nsGreen() { return Math.floor(performance.now() / 8000) % 2 === 0; },
   isRoad(x, y) { return this.inB(x, y) && this.roadMap[this.idx(x, y)] === 1; },
   isRail(x, y) { return this.inB(x, y) && this.railMap[this.idx(x, y)] === 1; },
 

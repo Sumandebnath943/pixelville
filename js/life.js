@@ -350,7 +350,7 @@ const Life = {
       const bni = bus.dir > 0 ? Math.ceil(bus.prog) : Math.floor(bus.prog);
       if (World.crossings.size && bni !== bus.prog && bni >= 0 && bni < bus.route.length) {
         const [bnx, bny] = bus.route[bni];
-        if (World.crossings.has(World.idx(bnx, bny)) && this.trainNearTile(bnx, bny, 7)) continue;
+        if (World.crossings.has(World.idx(bnx, bny)) && this.trainNearTile(bnx, bny, 5)) continue;
       }
       bus.prog += 1.9 * dt * bus.dir;
       if (bus.prog >= bus.route.length - 1) { bus.prog = bus.route.length - 1; bus.dir = -1; bus.pause = 5; }
@@ -649,7 +649,27 @@ const Life = {
                   World.buildings.find(b => (b.type === 'school' || b.type === 'park') && b.connected && !b.ruined) ||
                   World.buildings.find(b => b.connected && !b.ruined);
     if (!venue) return;
-    const cx = venue.door.x * T + 8, cy = venue.door.y * T + 14;
+    // the polling station stands on open ground BESIDE the hall — booths,
+    // ballot box and the whole queue need a clear lawn, not the middle of
+    // the road outside the front door
+    const vcx = venue.x + (venue.w >> 1), vcy = venue.y + venue.h;
+    let spot = null;
+    for (let r = 1; r <= 7 && !spot; r++) {
+      for (let j = -r; j <= r && !spot; j++) for (let i = -r; i <= r; i++) {
+        if (Math.max(Math.abs(i), Math.abs(j)) !== r) continue;
+        const x = vcx + i, y = vcy + j;
+        let ok = true;
+        for (let dx = -2; dx <= 2 && ok; dx++) for (let dy = 0; dy <= 1; dy++) {
+          if (!World.inB(x + dx, y + dy)) { ok = false; break; }
+          const k = World.idx(x + dx, y + dy);
+          const gk = World.ground[k];
+          if ((gk !== G_GRASS && gk !== G_SAND) || World.bmap[k] || World.roadMap[k] || World.railMap[k]) { ok = false; break; }
+        }
+        if (ok) spot = { x, y };
+      }
+    }
+    const cx = spot ? spot.x * T + 8 : venue.door.x * T + 8;
+    const cy = spot ? spot.y * T + 8 : venue.door.y * T + 30;
     const queue = [];
     const adults = Sim.people.filter(p => p.kind !== 'kid');
     const n = Math.min(10, 4 + (adults.length / 4 | 0));
@@ -1447,10 +1467,16 @@ const Life = {
     this.cooldown = 380 + Math.random() * 400;
   },
 
-  /* is any train within r tiles of this spot? (level-crossing gates ask) */
+  /* is any train within r tiles of this spot? (level-crossing gates ask)
+     A train dwelling at a station platform doesn't keep distant gates
+     down for the whole stop — only one actually ON the crossing does. */
   trainNearTile(x, y, r) {
-    for (const tr of this.trains)
-      if (Math.abs(tr.x / T - x) + Math.abs(tr.y / T - y) < r) return true;
+    for (const tr of this.trains) {
+      const d = Math.abs(tr.x / T - x) + Math.abs(tr.y / T - y);
+      if (d >= r) continue;
+      if (tr.pause > 3 && d > 2.5) continue;
+      return true;
+    }
     return false;
   },
 

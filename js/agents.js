@@ -1319,12 +1319,11 @@ const Sim = {
           const [, py2] = t.path[Math.floor(t.prog)];
           const key = World.idx(nx2, ny2);
           if (World.signals.size && World.signals.has(key)) {
-            const nsGreen = Math.floor(Sim.clock / 2.5) % 2 === 0; // 2½-minute cycle
             const movingNS = ny2 !== py2;
-            if (movingNS !== nsGreen) return; // red for us — wait at the line
+            if (movingNS !== World.nsGreen()) return; // red for us — wait at the line
           }
           if (World.crossings.size && World.crossings.has(key) &&
-              typeof Life !== 'undefined' && Life.trainNearTile(nx2, ny2, 7)) return; // gates are down
+              typeof Life !== 'undefined' && Life.trainNearTile(nx2, ny2, 5)) return; // gates are down
         }
       }
       const speed = (t.car || t.taxi) ? CAR_SPEED : t.moto ? 1.6 : WALK_SPEED;

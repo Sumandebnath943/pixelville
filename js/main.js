@@ -129,10 +129,19 @@ function rebuildGround() {
     const gr = World.ground[i];
     const m = World.roadMask(x, y);
     // avenue intersections (2x2 blocks of 4-way tiles) get traffic lights;
-    // the head is drawn once, at the top-left corner of the junction box
+    // the post stands on the corner PAVEMENT beside the junction, never on
+    // the asphalt itself
     if (popcount(m) === 4) {
       World.signals.add(i);
-      if (!is4way(x - 1, y) && !is4way(x, y - 1)) UI.signalHeads.push([x, y]);
+      if (!is4way(x - 1, y) && !is4way(x, y - 1)) {
+        for (const [cx2, cy2] of [[x - 1, y - 1], [x + 2, y - 1], [x - 1, y + 2], [x + 2, y + 2]]) {
+          if (World.inB(cx2, cy2) && !World.isRoad(cx2, cy2) &&
+              !World.bmap[World.idx(cx2, cy2)] && World.ground[World.idx(cx2, cy2)] !== G_WATER) {
+            UI.signalHeads.push([cx2, cy2]);
+            break;
+          }
+        }
+      }
     }
     if (gr === G_WATER) { g.drawImage((m & 10) ? SPR.bridgeH : SPR.bridgeV, x * T, y * T); }
     else {
@@ -152,7 +161,17 @@ function rebuildGround() {
       }
       if (winter) { g.fillStyle = 'rgba(238,243,248,0.16)'; g.fillRect(x * T, y * T, T, T); }
     }
-    if ((x * 7 + y * 13) % 7 === 0 && gr !== G_WATER) UI.lampSpots.push([x, y]);
+    // street lamps: REGULAR spacing along the outer edges of every road,
+    // alternating sides every half-interval — never in the traffic lanes
+    // (avenue edge tiles carry 3 road neighbours, so only true 4-way
+    // intersections and level crossings go without a post)
+    if (gr !== G_WATER && popcount(m) !== 4 && !World.railMap[i]) {
+      const horiz = (m & 10) !== 0, vert = (m & 5) !== 0;
+      if (horiz && !World.isRoad(x, y - 1) && x % 6 === 0) UI.lampSpots.push([x, y, 0]);      // north kerb
+      else if (horiz && !World.isRoad(x, y + 1) && x % 6 === 3) UI.lampSpots.push([x, y, 1]); // south kerb
+      else if (vert && !World.isRoad(x - 1, y) && y % 6 === 0) UI.lampSpots.push([x, y, 2]);  // west kerb
+      else if (vert && !World.isRoad(x + 1, y) && y % 6 === 3) UI.lampSpots.push([x, y, 3]);  // east kerb
+    }
   }
 
   /* pass 3.5 — railway tracks: ballast on grass, bare rails over level
@@ -316,35 +335,39 @@ function render(now) {
     }
   }
 
-  // street lamp posts + their light sources (dressed up on festival days)
+  // street lamp posts on the kerbs (dressed up on festival days)
   const xmasNow = typeof Festivals !== 'undefined' && Festivals.decorated();
   const diwaliNow = typeof Festivals !== 'undefined' && Festivals.diyasTonight();
-  for (const [x, y] of UI.lampSpots) {
+  for (const [x, y, side] of UI.lampSpots) {
     if (x < vx0 || x > vx1 || y < vy0 || y > vy1) continue;
-    ctx.drawImage(SPR.lamp, x * T + 11, y * T - 8);
-    if (xmasNow) { // garland spiral + red bow + a string of coloured bulbs
+    // base sits on the sidewalk strip of its side of the road
+    const px = side === 2 ? x * T - 1 : side === 3 ? x * T + 12 : x * T + 6;
+    const py = side === 0 ? y * T - 11 : side === 1 ? y * T + 2 : y * T - 5;
+    ctx.drawImage(SPR.lamp, px, py);
+    if (xmasNow) { // garland wraps + red bow + a swag of coloured bulbs
       const gcols = ['#ff6060', '#ffd160', '#60c0ff', '#80ff90'];
       ctx.fillStyle = '#2e6b38';
-      ctx.fillRect(x * T + 12, y * T - 6, 1, 1); ctx.fillRect(x * T + 14, y * T - 3, 1, 1); ctx.fillRect(x * T + 12, y * T, 1, 1);
-      ctx.fillStyle = '#c0392b'; ctx.fillRect(x * T + 12, y * T - 8, 3, 2); // bow
-      for (let k = 0; k < 4; k++) { // swag of lights hanging streetward
+      ctx.fillRect(px + 1, py + 2, 1, 1); ctx.fillRect(px + 3, py + 5, 1, 1); ctx.fillRect(px + 1, py + 8, 1, 1);
+      ctx.fillStyle = '#c0392b'; ctx.fillRect(px + 1, py, 3, 2); // bow
+      for (let k = 0; k < 4; k++) {
         ctx.fillStyle = gcols[(k + Math.floor(now / 500)) % 4];
-        ctx.fillRect(x * T + 8 - k * 3, y * T - 6 + Math.round(Math.sin(k * 1.2) * 2) + 2, 1, 1);
+        ctx.fillRect(px - 2 - k * 2, py + 2 + Math.round(Math.sin(k * 1.2) * 2), 1, 1);
       }
     }
     if (diwaliNow) { // marigold garland
-      ctx.fillStyle = '#e8962c'; ctx.fillRect(x * T + 12, y * T - 6, 3, 1);
-      ctx.fillStyle = '#f2c14f'; ctx.fillRect(x * T + 12, y * T - 4, 3, 1);
+      ctx.fillStyle = '#e8962c'; ctx.fillRect(px + 1, py + 2, 3, 1);
+      ctx.fillStyle = '#f2c14f'; ctx.fillRect(px + 1, py + 4, 3, 1);
     }
-    if (dark > 0.1) UI.lights.push({ x: x * T + 13, y: y * T + 2, r: 24, a: 0.85, tint: 'warm' });
+    if (dark > 0.1) UI.lights.push({ x: px + 2, y: py + 2, r: 24, a: 0.85, tint: 'warm' });
   }
 
-  // traffic lights at avenue intersections (cars genuinely obey them)
-  const nsGreen = Math.floor(Sim.clock / 2.5) % 2 === 0;
+  // traffic lights at avenue intersections (cars genuinely obey them);
+  // the phase runs on real time so it never strobes under fast-forward
+  const nsGreen = World.nsGreen();
   for (const [x, y] of UI.signalHeads || []) {
     if (x < vx0 - 1 || x > vx1 || y < vy0 - 1 || y > vy1) continue;
-    const px0 = x * T - 4, py0 = y * T - 10;
-    ctx.fillStyle = '#3c4048'; ctx.fillRect(px0 + 2, py0 + 8, 1, 10);          // pole
+    const px0 = x * T + 5, py0 = y * T - 4; // standing on its corner pavement
+    ctx.fillStyle = '#3c4048'; ctx.fillRect(px0 + 2, py0 + 9, 1, 11);          // pole
     ctx.fillStyle = '#26282e'; ctx.fillRect(px0, py0, 5, 9);                    // head
     ctx.fillStyle = nsGreen ? '#802020' : '#ff5040'; ctx.fillRect(px0 + 1, py0 + 1, 3, 3);   // EW aspect
     ctx.fillStyle = nsGreen ? '#40e050' : '#1e5a28'; ctx.fillRect(px0 + 1, py0 + 5, 3, 3);   // NS aspect
@@ -354,7 +377,7 @@ function render(now) {
   // level-crossing gates: barriers drop and blinkers flash while a train is near
   for (const [x, y, railNS] of UI.crossingSpots || []) {
     if (x < vx0 || x > vx1 || y < vy0 || y > vy1) continue;
-    const closed = Life.trainNearTile(x, y, 7);
+    const closed = Life.trainNearTile(x, y, 5);
     if (closed) {
       const blink = Math.floor(now / 260) % 2;
       ctx.fillStyle = '#e8e4cf';
@@ -660,10 +683,10 @@ function render(now) {
       if (b.type === 'fire' && !Life.fireTrucks.length)
         ctx.drawImage(SPR.fireTruck.h, b.x * T - 2, (b.y + b.h) * T - 10);
       const bd = CAT[b.type];
-      // customer cars parked outside venues
+      // customer cars parallel-parked against the kerb (not out in the lane)
       if (b.parked > 0 && bd.visit) {
-        for (let k = 0; k < Math.min(3, b.parked); k++) {
-          const px = b.x * T - 14 + k * 2, py = b.y * T + 2 + k * 12;
+        for (let k = 0; k < Math.min(2, b.parked); k++) {
+          const px = b.x * T - 9, py = b.y * T + 1 + k * 13;
           ctx.drawImage(SPR.car((b.id + k * 3) % 8).v, px, py);
         }
       }
