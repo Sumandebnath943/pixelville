@@ -136,6 +136,22 @@ const Snd = {
     }
   },
   launch() { this.noise(0.35, 0.03, 2200, 'highpass'); },
+  /* life-event jingles */
+  baby() { // a soft lullaby coo
+    this.tone(880, 1040, 0.28, 0.05, 'sine');
+    this.tone(1040, 880, 0.3, 0.04, 'sine', 0.3);
+    this.tone(1180, null, 0.35, 0.035, 'sine', 0.62);
+  },
+  ding() { // the shop counter's cash-register ring
+    this.tone(1320, null, 0.12, 0.06, 'square');
+    this.tone(1760, null, 0.2, 0.05, 'sine', 0.06);
+    this.noise(0.05, 0.03, 3200, 'highpass', 0.02);
+  },
+  fanfare() { // an election-night / milestone flourish
+    const notes = [523, 659, 784, 1046];
+    notes.forEach((f, i) => this.tone(f, null, 0.28, 0.06, 'triangle', i * 0.14));
+    this.tone(1046, null, 0.65, 0.05, 'sine', 0.62);
+  },
   pop() {
     this.noise(0.1, 0.12, 1200, 'highpass');
     for (let i = 0; i < 4; i++) this.noise(0.04, 0.05, 2600, 'highpass', 0.12 + i * 0.07 + Math.random() * 0.05);

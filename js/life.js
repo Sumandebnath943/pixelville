@@ -39,7 +39,9 @@ const Life = {
     this.reporters = []; this.beachfolk = []; this.sandTiles = [];
     if (typeof Tasks !== 'undefined') Tasks.reset();
   },
-  say(m) { if (this.onEvent) this.onEvent(m); },
+  /* `at` (optional, world px {x,y}) makes the toast clickable — one click
+     pans the camera to the scene, and the minimap gets a flashing pin */
+  say(m, at) { if (this.onEvent) this.onEvent(m, at); },
 
   tick(dtSim, dtReal) {
     this.tickHikers(dtSim);
@@ -226,7 +228,7 @@ const Life = {
           const oh = World.buildings.find(o => o.id === b.ownerId);
           if (oh) for (const r of oh.residents) r.mood = Math.max(5, (r.mood === undefined ? 60 : r.mood) - 10);
         }
-        this.say(`🔥 Fire at the ${CAT[b.type].name}!`);
+        this.say(`🔥 Fire at the ${CAT[b.type].name}!`, { x: b.x * T + b.w * 8, y: b.y * T + b.h * 8 });
         if (typeof Tasks !== 'undefined') Tasks.add('fire' + b.id, '🔥', `Put out the fire at the ${CAT[b.type].name}`);
         if (typeof Snd !== 'undefined') Snd.siren();
         this.dispatchFire(b, true);
@@ -743,7 +745,7 @@ const Life = {
     const charge = murder ? 'murder' : 'a violent assault';
     Sim.safety = Math.max(10, Sim.safety - (murder ? 14 : 8));
     if (murder) {
-      this.say(`🕯️ DARK DAY: ${Sim.fullName(victim)} was found murdered. The village is in shock and demands justice.`);
+      this.say(`🕯️ DARK DAY: ${Sim.fullName(victim)} was found murdered. The village is in shock and demands justice.`, { x: victim.home.x * T + 8, y: victim.home.y * T + 8 });
       for (const r of victim.home.residents) if (r !== victim) r.mood = Math.max(5, (r.mood || 60) - 30);
       Sim.removePerson(victim);
     } else {
@@ -884,7 +886,7 @@ const Life = {
         Sim.onBuildingRemoved(b);
         World.dirty = true;
         Sim.safety = Math.max(20, Sim.safety - 3);
-        this.say(`💥 The ${CAT[b.type].name} suddenly collapsed! Neighbors are rushing to help`);
+        this.say(`💥 The ${CAT[b.type].name} suddenly collapsed! Neighbors are rushing to help`, { x: b.x * T + b.w * 8, y: b.y * T + b.h * 8 });
         if (typeof Snd !== 'undefined') Snd.crunch();
         this.startDisaster(b, 'collapse');
         this.collapseCd = 4000;
@@ -961,7 +963,7 @@ const Life = {
       Gov.approval = Math.max(5, Gov.approval - 6);
       Sim.safety = Math.max(20, Sim.safety - 3);
       Gov.riotCd = 6;
-      this.say(`📢 Villagers are rioting outside ${hall.type === 'townhall' ? 'town hall' : 'in the street'} over ${grievance.reason} — they demand better from Mayor ${Gov.leader.name}!`);
+      this.say(`📢 Villagers are rioting outside ${hall.type === 'townhall' ? 'town hall' : 'in the street'} over ${grievance.reason} — they demand better from Mayor ${Gov.leader.name}!`, { x: cx, y: cy });
       this.dispatchTo(hall.door.x, hall.door.y, this.riot, 25);
       this.coverStory(cx, cy, this.riot, `Protest over ${grievance.reason} outside town hall`);
     }
@@ -1076,7 +1078,7 @@ const Life = {
           a.freezeT = b.freezeT = 9;
           this.dispute = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, t: 9, ppl: [a, b] };
           this.dispute.unit = this.dispatchTo(Math.round(a.x / T), Math.round(a.y / T), this.dispute, 8);
-          this.say(this.dispute.unit ? '😠 Public dispute in the street — police en route!' : '😠 A loud argument breaks out in the street');
+          this.say(this.dispute.unit ? '😠 Public dispute in the street — police en route!' : '😠 A loud argument breaks out in the street', { x: this.dispute.x, y: this.dispute.y });
           this.spawnGawkers(this.dispute.x, this.dispute.y, 3, this.dispute);
           this.incidentCd = 300;
           break;
@@ -1103,7 +1105,7 @@ const Life = {
           }
           if (typeof Snd !== 'undefined') Snd.crunch();
           this.crash.unit = this.dispatchTo(Math.round(this.crash.x / T), Math.round(this.crash.y / T), this.crash, 12);
-          this.say(this.crash.unit ? '💥 Car crash! Police are on the way' : '💥 Car crash! No squad car can respond — the drivers sort it out themselves');
+          this.say(this.crash.unit ? '💥 Car crash! Police are on the way' : '💥 Car crash! No squad car can respond — the drivers sort it out themselves', { x: this.crash.x, y: this.crash.y });
           this.spawnGawkers(this.crash.x, this.crash.y, 5, this.crash);
           this.coverStory(this.crash.x, this.crash.y, this.crash, 'Two-car collision snarls traffic');
           Sim.safety = Math.max(20, Sim.safety - 2);
@@ -1366,7 +1368,7 @@ const Life = {
           if (B.phase === 'approach') {
             B.phase = 'rob'; c.robT = 26;
             c.target.alarm = true;
-            this.say(`🚨 Break-in at the ${CAT[c.target.type].name}!`);
+            this.say(`🚨 Break-in at the ${CAT[c.target.type].name}!`, { x: c.target.x * T + c.target.w * 8, y: c.target.y * T + c.target.h * 8 });
             this.crimeN = (this.crimeN || 0) + 1;
             c.taskId = 'burglary' + this.crimeN;
             if (typeof Tasks !== 'undefined') Tasks.add(c.taskId, '🚨', `Catch the burglar at the ${CAT[c.target.type].name}`);

@@ -74,10 +74,13 @@ const Gov = {
   election: null,
   campaign: null,
 
+  taxRate: 'normal', // low | normal | high — set by the player in the mayor's report
+
   reset() {
     this.leader = null;
     this.treasury = 0;
     this.approval = 60;
+    this.taxRate = 'normal';
     this.lastElection = 1;
     this.scandals = 0;
     this.recentBuilds = 0;
@@ -463,6 +466,7 @@ const Gov = {
       share,
       candidates: candidates.map((c, i) => ({ name: c.name, kind: c.type.kind, votes: votes[i] })),
     };
+    if (typeof Snd !== 'undefined') Snd.fanfare();
     if (!former) this.say(`🗳️ ${winner.name} was elected mayor with ${share}% of the village vote — ${winner.type.label} ${winner.type.emoji}`);
     else if (reelected) this.say(`🗳️ Election day: Mayor ${winner.name} kept the trust of the village (${share}% of votes).`);
     else this.say(`🗳️ Election day: ${former.name} was voted out. ${winner.name} won with ${share}% of votes.`);
@@ -481,12 +485,31 @@ const Gov = {
   },
 
   collectTaxes() {
+    // the player sets the pressure: light taxes please people but starve the
+    // treasury; heavy taxes fund the mayor's plans and sour the streets
+    const perHome = { low: 1, normal: 2, high: 3.5 }[this.taxRate] || 2;
+    const bizCut = { low: 0, normal: 0.02, high: 0.05 }[this.taxRate] || 0.02;
     let tax = 0;
     for (const b of World.buildings) {
       if (!CAT[b.type].res || b.ruined || !b.residents.length || b.funds <= 12) continue;
-      const contribution = Math.min(2, Math.max(0, b.funds - 10));
+      const contribution = Math.min(perHome, Math.max(0, b.funds - 10));
       b.funds -= contribution;
       tax += contribution;
+      if (this.taxRate === 'high') {
+        for (const r of b.residents) if (Math.random() < 0.25)
+          r.mood = Math.max(5, (r.mood === undefined ? 60 : r.mood) - 1);
+      } else if (this.taxRate === 'low' && Math.random() < 0.2) {
+        const r = b.residents[0];
+        r.mood = Math.min(98, (r.mood === undefined ? 60 : r.mood) + 1);
+      }
+    }
+    if (bizCut > 0) {
+      for (const b of World.buildings) {
+        if (!b.founderId || b.ruined || b.construction || !CAT[b.type].visit || b.funds <= 20) continue;
+        const levy = (b.funds - 15) * bizCut;
+        b.funds -= levy;
+        tax += levy;
+      }
     }
     const skimmed = tax * this.leader.type.skim;
     this.treasury += tax - skimmed;
@@ -963,6 +986,8 @@ const Gov = {
       unmetNeeds: this.unmetNeeds,
       riotCd: this.riotCd,
       election: this.election,
+      taxRate: this.taxRate,
+      nextRailDay: this.nextRailDay || 0,
     };
   },
 
@@ -993,5 +1018,7 @@ const Gov = {
     this.unmetNeeds = g.unmetNeeds || {};
     this.riotCd = g.riotCd || 0;
     this.election = g.election || null;
+    this.taxRate = g.taxRate || 'normal';
+    this.nextRailDay = g.nextRailDay || 0;
   },
 };

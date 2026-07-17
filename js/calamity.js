@@ -31,7 +31,7 @@ const Calamity = {
     for (const b of World.buildings) { b.flooded = false; b.quakeDamage = false; }
   },
 
-  say(m) { if (typeof Life !== 'undefined') Life.say(m); },
+  say(m, at) { if (typeof Life !== 'undefined') Life.say(m, at); },
   news(m) { if (typeof News !== 'undefined') News.breaking(m); },
 
   tick(dtSim) {
@@ -152,7 +152,7 @@ const Calamity = {
       if (wet) for (const r of b.residents) r.mood = Math.max(5, (r.mood === undefined ? 60 : r.mood) - 12);
     }
     Weather.kind = 'heavy'; Weather.target = 1; Weather.nextChange = Math.max(Weather.nextChange, 420);
-    this.say('🌊 FLOOD! The monsoon burst the banks — streets are under water. Villagers are pulling each other onto rafts!');
+    this.say('🌊 FLOOD! The monsoon burst the banks — streets are under water. Villagers are pulling each other onto rafts!', this._floodTiles && this._floodTiles.length ? { x: (this._floodTiles[0] % GW) * T, y: ((this._floodTiles[0] / GW) | 0) * T } : undefined);
     this.news('Flooding across the village — rafts out, everyone helping everyone');
     if (typeof Tasks !== 'undefined') Tasks.add('flood', '🌊', 'Ride out the flood, then drain the streets together');
     if (typeof Life !== 'undefined') {
@@ -272,7 +272,7 @@ const Calamity = {
     };
     this.active = { type: 'tornado', t: 9999 };
     Weather.kind = 'heavy'; Weather.target = 1; Weather.nextChange = 300;
-    this.say('🌪️ TORNADO! A funnel has touched down — take cover! Sirens are wailing across the village.');
+    this.say('🌪️ TORNADO! A funnel has touched down — take cover! Sirens are wailing across the village.', { x: this.tornado.x, y: this.tornado.y });
     this.news('Tornado on the ground — take cover NOW');
     if (typeof Tasks !== 'undefined') Tasks.add('tornado', '🌪️', 'Shelter from the tornado, then rebuild together');
     if (typeof Snd !== 'undefined') Snd.siren();

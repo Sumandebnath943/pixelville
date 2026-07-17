@@ -92,6 +92,15 @@ const GIVEN_NAMES = ['Asha', 'Maya', 'Ishan', 'Noor', 'Dev', 'Elena', 'Farah', '
 /* the arc of a life, in years — a year passes each in-game day */
 const AGE_ADULT = 18, AGE_RETIRE = 65, AGE_FRAIL = 70;
 
+/* the village's climb: each tier is a named celebration when first reached */
+const TIERS = [
+  { pop: 0, name: 'Hamlet', emoji: '🛖' },
+  { pop: 21, name: 'Village', emoji: '🏘️' },
+  { pop: 61, name: 'Town', emoji: '🏫' },
+  { pop: 121, name: 'City', emoji: '🏙️' },
+  { pop: 201, name: 'Metropolis', emoji: '🌆' },
+];
+
 function chooseLifestyle() {
   let roll = Math.random() * ADULT_LIFESTYLES.reduce((n, s) => n + s.weight, 0);
   for (const style of ADULT_LIFESTYLES) {
@@ -131,6 +140,7 @@ const Sim = {
     this.growthT = 0; this.nextGrowthDay = 0; this.nextEnterpriseDay = 0;
     this.stocks = null; this.nextPioneerDay = 0; this.carePulse = 0;
     this.history = []; this.tierReached = 0; this.scenario = null;
+    this.firstFamilyDone = false; this.welcomeAt = null;
   },
 
   hour() { return Math.floor(this.clock / 60); },
@@ -169,7 +179,16 @@ const Sim = {
         const fam = this.spawnFamily(b);
         b.funds = (d.rich ? 380 : 40) + Math.random() * 80;
         for (let i = 0; i < (d.cars || 0); i++) b.cars.push({ free: true, seed: (Math.random() * 8) | 0 });
-        msgs.push(`The ${fam.surname} family moved in — ${fam.n} resident${fam.n > 1 ? 's' : ''} 🏠`);
+        if (!this.firstFamilyDone) {
+          // the founding moment: the very first household deserves an occasion
+          this.firstFamilyDone = true;
+          this.welcomeAt = { x: b.x * T + b.w * 8, y: b.y * T + b.h * 8 };
+          msgs.push(`🎊 ${World.name} is founded! The ${fam.surname} family are the very first residents — ${fam.n} pioneer${fam.n > 1 ? 's' : ''} unpacking boxes`);
+          if (typeof News !== 'undefined') News.breaking(`${World.name} is founded — the ${fam.surname}s move into the first home`);
+          if (typeof Life !== 'undefined') Life.celebrate(this.welcomeAt.x, this.welcomeAt.y, '#ffd160');
+        } else {
+          msgs.push(`The ${fam.surname} family moved in — ${fam.n} resident${fam.n > 1 ? 's' : ''} 🏠`);
+        }
       }
     } else if (d.res === 'block') {
       let total = 0;
@@ -195,6 +214,7 @@ const Sim = {
     if (d.visit && b.connected) {
       this.grandOpening = { b, day: this.day };
       msgs.push(`🎉 Grand opening at the ${d.name} — the whole town is talking!`);
+      if (typeof Snd !== 'undefined') Snd.ding();
     }
     // word gets around: neighbours hear of the new place (PVTV tells everyone)
     if (typeof Mind !== 'undefined') Mind.announcePlace(b);
@@ -495,6 +515,8 @@ const Sim = {
       this.lifeCycle(); // birthdays, love, weddings, births, old age
       for (const p of this.people) if (p.state === 'in' && p.at === p.home) this.planDay(p);
       this.dailyEconomy();
+      this.recordHistory();
+      this.checkTier();
       // Government decisions happen after families have earned, saved, and
       // made their own plans for the day.
       if (typeof Gov !== 'undefined') Gov.dayTick();
@@ -663,6 +685,7 @@ const Sim = {
                       World.buildings.find(b => b.type === 'townhall' && b.connected && !b.ruined) ||
                       World.buildings.find(b => (b.type === 'park' || b.type === 'grandpark') && b.connected && !b.ruined);
         say(`💍 Wedding bells! ${this.fullName(p)} and ${this.fullName(q)} got married${venue ? ` at the ${CAT[venue.type].name}` : ''} 🎉`);
+        if (typeof Snd !== 'undefined') Snd.bell();
         p.home.funds = Math.max(0, p.home.funds - 25); // the party isn't free
         p.mood = q.mood = 95;
         if (typeof Mind !== 'undefined') {
@@ -713,6 +736,7 @@ const Sim = {
           const baby = this.makePerson('kid', p.surname, p.home, 0);
           baby.mood = 80;
           say(`👶 A baby! ${this.fullName(p)} and family welcomed little ${baby.name} ${baby.surname}`);
+          if (typeof Snd !== 'undefined') Snd.baby();
           for (const r of p.home.residents) {
             r.mood = Math.min(98, (r.mood === undefined ? 60 : r.mood) + 10);
             if (typeof Mind !== 'undefined' && r !== baby) Mind.remember(r, 'family', `welcomed little ${baby.name}`, 2);
@@ -1559,6 +1583,39 @@ const Sim = {
     p.x = sx * T + 8; p.y = sy * T + 8;
   },
 
+  /* ---------- the village chronicle: daily samples for the history charts ---------- */
+  recordHistory() {
+    const s = this.stats();
+    if (!this.history) this.history = [];
+    this.history.push({
+      d: this.day, pop: s.pop, hap: s.happiness, safe: s.safety,
+      wealth: s.wealth, tre: typeof Gov !== 'undefined' ? Math.round(Gov.treasury) : 0,
+    });
+    if (this.history.length > 400) this.history.shift();
+  },
+
+  /* ---------- milestones: the climb from hamlet to metropolis ---------- */
+  tierIndex() {
+    let ti = 0;
+    for (let i = 0; i < TIERS.length; i++) if (this.people.length >= TIERS[i].pop) ti = i;
+    return ti;
+  },
+  checkTier() {
+    const ti = this.tierIndex();
+    if (ti <= (this.tierReached || 0)) return;
+    this.tierReached = ti;
+    const t = TIERS[ti];
+    const c = typeof Gov !== 'undefined' ? Gov.townCenter() : { x: GW >> 1, y: GH >> 1 };
+    if (typeof Life !== 'undefined') {
+      Life.say(`${t.emoji} A new charter! With ${this.people.length} residents, ${World.name} is officially a ${t.name.toUpperCase()} — the whole place celebrates!`, { x: c.x * T, y: c.y * T });
+      Life.celebrate(c.x * T, c.y * T, '#ffd160');
+    }
+    if (typeof News !== 'undefined') News.breaking(`${World.name} is now a ${t.name}! Charter signed at ${this.people.length} residents`);
+    if (typeof Tasks !== 'undefined') Tasks.log(`${t.emoji} ${World.name} reached ${t.name} status (${this.people.length} residents)`);
+    if (typeof Snd !== 'undefined') Snd.fanfare();
+    for (const p of this.people) p.mood = Math.min(98, (p.mood === undefined ? 60 : p.mood) + 6);
+  },
+
   /* ---------- save / load: the people themselves ----------
      Everything persistent about a villager travels with the save: identity,
      family ties, career, savings, mood, record — and their entire mind.
@@ -1612,6 +1669,7 @@ const Sim = {
     for (const p of this.people) if (p.partnerId && !ids.has(p.partnerId)) p.partnerId = null;
     this.assignJobs(); this.assignSchools();
     for (const p of this.people) this.planDay(p);
+    this.firstFamilyDone = this.people.length > 0; // a loaded village was founded long ago
   },
 
   /* ---------- stats ---------- */

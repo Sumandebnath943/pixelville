@@ -1477,6 +1477,15 @@ function render(now) {
     ctx.strokeStyle = '#ffe066'; ctx.lineWidth = 1.5 / z;
     ctx.strokeRect(b.x * T - 1, b.y * T - 1, b.w * T + 2, b.h * T + 2);
   } else if (UI.selected) { UI.selected = null; hideInfo(); }
+  // a golden ring follows the villager under inspection
+  if (UI.selectedPerson) {
+    const sp = UI.selectedPerson;
+    if (!Sim.people.includes(sp)) UI.selectedPerson = null;
+    else if (sp.state === 'walk') {
+      ctx.strokeStyle = '#ffe066'; ctx.lineWidth = 1.5 / z;
+      ctx.beginPath(); ctx.arc(sp.x, sp.y - 4, 7, 0, 7); ctx.stroke();
+    }
+  }
   // undo the earthquake jolt so the camera doesn't wander
   UI.camX -= shakeRX; UI.camY -= shakeRY;
 }
@@ -1695,7 +1704,7 @@ canvas.addEventListener('pointerup', e => {
     const ps = UI.panStart; UI.panStart = null;
     if (ps && !ps.moved) {
       if (e.button === 2) { setTool(null); return; }
-      if (ps.maybeSelect) selectAt(t.x, t.y);
+      if (ps.maybeSelect) selectAt(t.x, t.y, t.mx / UI.zoom + UI.camX, t.my / UI.zoom + UI.camY);
     }
     return;
   }
@@ -1754,7 +1763,17 @@ function clampCam() {
   UI.camY = Math.max(-vh * 0.3, Math.min(GH * T - vh * 0.7, UI.camY));
 }
 
-function selectAt(x, y) {
+function selectAt(x, y, wx, wy) {
+  // a walking villager under the cursor wins over the building behind them
+  if (wx !== undefined) {
+    let best = null, bd = 10;
+    for (const p of Sim.travelers()) {
+      const d = Math.abs(p.x - wx) + Math.abs(p.y - wy);
+      if (d < bd) { bd = d; best = p; }
+    }
+    if (best) { UI.selected = null; UI.selectedPerson = best; showPersonInfo(best); return; }
+  }
+  UI.selectedPerson = null;
   const b = World.buildingAt(x, y);
   UI.selected = b || null;
   if (b) showInfo(b); else hideInfo();
@@ -1772,6 +1791,32 @@ const CAT_GROUPS = [
   ['nature', '🌲 Nature'],
 ];
 
+/* what a palette item will actually DO for the town — shown on hover */
+function paletteTip(key, d) {
+  const bits = [d.name];
+  if (d.res === 'family') bits.push('one family moves in');
+  if (d.res === 'block') bits.push(`${d.fams || 4} families move in`);
+  if (d.jobs) bits.push(`${d.jobs} jobs`);
+  if (d.hours && d.hours.e - d.hours.s < 1440)
+    bits.push(`open ${Math.floor(d.hours.s / 60)}:00–${Math.floor(d.hours.e / 60)}:00`);
+  if (d.visit === 'shop') bits.push('villagers run errands here');
+  if (d.visit === 'leisure') bits.push('evenings out & weekends');
+  const notes = {
+    police: 'answers crimes, crashes & disputes', fire: 'douses fires before ruin',
+    school: 'kids enroll on weekdays', college: 'jobless adults study here',
+    hospital: 'catches the unwell', courthouse: 'trials & stronger convictions',
+    bank: 'founders can take business loans', townhall: "the mayor's office",
+    busstop: 'two stops start a bus line', trainstation: 'two railed stations start trains',
+    taxistand: 'cabs for the car-less', dock: 'boats, ferries & waterfront work',
+    watertower: 'clean water (drought insurance)', powerplant: 'electric light for the town',
+    park: 'free fun, happier neighbours', casino: 'the house usually wins',
+    exchange: 'the five tickers get a floor', tvstation: 'news travels town-wide instantly',
+    farm: 'the village grows what it eats', airport: 'planes bring extra visitors',
+  };
+  if (notes[key]) bits.push(notes[key]);
+  return bits.join('\n');
+}
+
 function buildPalette() {
   const el = document.getElementById('palette');
   for (const [cat, label] of CAT_GROUPS) {
@@ -1785,7 +1830,7 @@ function buildPalette() {
       const d = CAT[key];
       if (d.cat !== cat) continue;
       const item = document.createElement('div');
-      item.className = 'pal-item'; item.dataset.key = key; item.title = d.name;
+      item.className = 'pal-item'; item.dataset.key = key; item.title = paletteTip(key, d);
       if (d.draw) {
         const th = document.createElement('canvas');
         th.width = 44; th.height = 44;
@@ -1836,7 +1881,16 @@ function updateHUD() {
   const xmasLock = typeof Festivals !== 'undefined' && Festivals.speedLocked();
   document.querySelectorAll('#speed button').forEach((b, n) => b.classList.toggle('locked', xmasLock && n >= 2));
   document.getElementById('chip-season').textContent = Weather.label();
-  document.getElementById('chip-weather').textContent = Weather.weatherLabel();
+  const fc = Weather.forecastEmoji();
+  document.getElementById('chip-weather').textContent = Weather.weatherLabel() + (fc ? ` → ${fc}` : '');
+  // the village tier: how far up the charter ladder we've climbed
+  const tierEl = document.getElementById('chip-tier');
+  if (tierEl && typeof TIERS !== 'undefined') {
+    const ti = Sim.tierIndex();
+    tierEl.textContent = `${TIERS[ti].emoji} ${TIERS[ti].name}`;
+    const next = TIERS[ti + 1];
+    tierEl.title = next ? `${s.pop}/${next.pop} residents to become a ${next.name}` : 'The summit: a Metropolis!';
+  }
   document.getElementById('stat-pop').textContent = s.pop;
   document.getElementById('stat-jobs').textContent = `${s.employed}/${s.adults}`;
   document.getElementById('stat-wealth').textContent = '$' + s.wealth.toLocaleString();
@@ -1900,6 +1954,15 @@ function updateMinimap() {
     for (let j = 0; j < b.h; j++) for (let k = 0; k < b.w; k++) put(World.idx(b.x + k, b.y + j), r, g2, b2);
   }
   mg.putImageData(img, 0, 0);
+  // incident pins: flashing markers where something just happened
+  if (UI.pins && UI.pins.length) {
+    const nowT = performance.now();
+    UI.pins = UI.pins.filter(p => p.until > nowT);
+    if (Math.floor(nowT / 300) % 2 === 0) {
+      mg.fillStyle = '#ff4040';
+      for (const p of UI.pins) mg.fillRect((p.x / T) - 1, (p.y / T) - 1, 3, 3);
+    }
+  }
   // viewport rectangle
   const sc = GW / (GW * T); // 1/T
   mg.strokeStyle = '#ffe066';
@@ -1917,14 +1980,28 @@ function setSpeed(i) {
   document.querySelectorAll('#speed button').forEach((b, n) => b.classList.toggle('active', n === i));
 }
 
-function toast(msg) {
+function panTo(wx, wy) {
+  UI.camX = wx - canvas.width / (2 * UI.zoom);
+  UI.camY = wy - canvas.height / (2 * UI.zoom);
+  clampCam();
+}
+
+/* `at` (world px {x,y}) makes a toast clickable — one click pans the camera
+   to the scene — and drops a flashing pin on the minimap */
+function toast(msg, at) {
   if (typeof Tasks !== 'undefined') Tasks.log(msg); // nothing is lost — it all lands in the task book
+  if (at) {
+    UI.pins = UI.pins || [];
+    UI.pins.push({ x: at.x, y: at.y, until: performance.now() + 12000 });
+  }
   const wrap = document.getElementById('toasts');
   const t = document.createElement('div');
-  t.className = 'toast'; t.textContent = msg;
+  t.className = 'toast' + (at ? ' jump' : '');
+  t.textContent = (at ? '📍 ' : '') + msg;
+  if (at) t.addEventListener('click', () => panTo(at.x, at.y));
   wrap.appendChild(t);
   while (wrap.children.length > 4) wrap.removeChild(wrap.firstChild);
-  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 400); }, 6000);
+  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 400); }, at ? 9000 : 6000);
 }
 
 function showInfo(b) {
@@ -1961,7 +2038,7 @@ function showInfo(b) {
     const fams = [...new Set(b.residents.map(r => r.surname))];
     rows += `<div class="info-row">👥 ${b.residents.length} residents (${fams.join(', ')})</div>`;
     const names = b.residents.slice(0, 5).map(r =>
-      `${r.name || '·'} (${r.age !== undefined ? r.age : '?'})`).join(', ');
+      `<span class="p-link" data-pid="${r.id}">${r.name || '·'}</span> (${r.age !== undefined ? r.age : '?'})`).join(', ');
     rows += `<div class="info-row">🪪 ${names}${b.residents.length > 5 ? '…' : ''}</div>`;
     const away = b.residents.filter(r => r.at !== b || r.state === 'walk').length;
     rows += `<div class="info-row">🚶 ${away} out right now</div>`;
@@ -1993,16 +2070,142 @@ function showInfo(b) {
   if (d.visit) rows += `<div class="info-row">🧾 ${b.visitors} visitors today</div>`;
   if (b.type === 'police') rows += `<div class="info-row">🚔 ${Life.arrests} arrests town-wide</div>`;
   if (b.cars.length) rows += `<div class="info-row">🚗 ${b.cars.filter(c => c.free).length}/${b.cars.length} cars parked</div>`;
+  // the exchange floor: live hometown tickers
+  if (b.type === 'exchange' && Sim.stocks) {
+    rows += `<div class="info-row">📊 PVX index: ${Sim.stockIndex()}</div>`;
+    for (const q of Sim.stocks) {
+      const up = q.price >= (q.prev || q.price);
+      rows += `<div class="info-row">${up ? '▲' : '▼'} ${q.sym} <b>$${q.price.toFixed(1)}</b> — ${q.name}</div>`;
+    }
+  }
+  // the family can be nudged up the property ladder by hand
+  const canUpgrade = b.type === 'house' && !b.upgrading && !b.construction && !b.ruined &&
+    b.residents.length && b.level < 3 && b.funds >= (b.level === 1 ? 250 : 600);
+  if (canUpgrade) rows += `<button id="upgrade-home">🔨 Add a floor ($${b.level === 1 ? 180 : 420})</button>`;
   rows += `<button id="demolish">🚜 Demolish</button> <button id="info-close">Close</button>`;
   el.innerHTML = rows;
+  if (canUpgrade) document.getElementById('upgrade-home').onclick = () => {
+    if (b.level === 1) { b.funds -= 180; b.upgrading = 240; }
+    else { b.funds -= 420; b.upgrading = 300; }
+    toast(`🔨 The ${b.residents[0].surname}s are adding a floor — you talked them into it!`);
+    showInfo(b);
+  };
   document.getElementById('demolish').onclick = () => {
     World.removeBuilding(b); Sim.onBuildingRemoved(b);
     afterMapEdit(); hideInfo(); UI.selected = null;
     toast(`${d.name} demolished 🚜`);
   };
   document.getElementById('info-close').onclick = hideInfo;
+  wirePersonLinks(el);
 }
-function hideInfo() { document.getElementById('info').style.display = 'none'; UI.selected = null; }
+function hideInfo() { document.getElementById('info').style.display = 'none'; UI.selected = null; UI.selectedPerson = null; }
+
+/* =============== the villager inspector ===============
+   The mind system is the game's hidden gem — this window opens it up:
+   click any walker (or a resident's name in a building card) to meet them. */
+function showPersonInfo(p) {
+  if (!Sim.people.includes(p)) { hideInfo(); return; }
+  const el = document.getElementById('info');
+  el.style.display = 'block';
+  const kindEmoji = p.kind === 'kid' ? '🧒' : p.kind === 'woman' ? '👩' : '👨';
+  const m = p.mood === undefined ? 60 : p.mood;
+  const moodFace = m >= 75 ? '😄' : m >= 52 ? '🙂' : m >= 36 ? '😕' : '😠';
+  let rows = `<div class="info-title">${kindEmoji} ${Sim.fullName(p)}</div>`;
+  rows += `<div class="info-row">🎂 ${p.age} years old · ${moodFace} mood ${Math.round(m)}%</div>`;
+  if (p.heldUntil > Sim.day) rows += `<div class="info-row">⛓️ In custody until day ${p.heldUntil}</div>`;
+  rows += `<div class="info-row">🏠 The ${p.surname} household${p.home && p.home.ownerId ? ' (renting)' : ''}</div>`;
+  if (p.work) rows += `<div class="info-row">💼 ${CAT[p.work.type].name} — $${Math.round((WAGES[p.work.type] || 15) * (p.wageMult || 1))}/day${(p.wageMult || 1) > 1.5 ? ' (senior)' : ''}</div>`;
+  else if (p.kind === 'kid') rows += `<div class="info-row">${p.school ? '🎒 Goes to school' : '🧸 Too young for school'}</div>`;
+  else if (p.age >= AGE_RETIRE) rows += `<div class="info-row">🪑 Retired after a working life</div>`;
+  else rows += `<div class="info-row">🔍 Between jobs${p.lastGig ? ` — lately ${p.lastGig}` : ''}</div>`;
+  rows += `<div class="info-row">🎭 ${p.lifestyle}${p.ownsBusiness ? ' · owns a business' : ''}${p.loan ? ` · loan $${Math.round(p.loan.balance)}` : ''}</div>`;
+  rows += `<div class="info-row">💵 Personal savings: $${Math.round(p.savings || 0)}</div>`;
+  const partner = p.partnerId ? Sim.people.find(q => q.id === p.partnerId) : null;
+  if (partner) rows += `<div class="info-row">${p.married ? '💍 Married to' : '💕 Sweethearts with'} <span class="p-link" data-pid="${partner.id}">${Sim.fullName(partner)}</span></div>`;
+  if (typeof Mind !== 'undefined' && p.mind) {
+    const t = p.mind.traits;
+    const domName = [['sociable', t.social], ['cautious', t.caution], ['ambitious', t.ambition], ['frugal', t.thrift], ['curious', t.curiosity]]
+      .sort((a, b) => b[1] - a[1])[0][0];
+    rows += `<div class="info-row">🧠 The ${domName} type · knows ${p.mind.knows.size} places</div>`;
+    const pals = Mind.friendsOf(p);
+    if (pals.length) {
+      const bestPal = pals.reduce((a, b2) => (p.mind.friends.get(a.id) || 0) >= (p.mind.friends.get(b2.id) || 0) ? a : b2);
+      rows += `<div class="info-row">🤝 ${pals.length} friend${pals.length > 1 ? 's' : ''} — closest: <span class="p-link" data-pid="${bestPal.id}">${Sim.fullName(bestPal)}</span></div>`;
+    }
+    let favB = null, favV = 0;
+    for (const [bid, v] of p.mind.favorites) if (v > favV) { favV = v; favB = World.buildings.find(q => q.id === bid); }
+    if (favB && favV >= 2) rows += `<div class="info-row">💚 Regular at the ${CAT[favB.type].name}</div>`;
+    const mems = p.mind.memories.slice(-3).reverse();
+    for (const mm of mems)
+      rows += `<div class="info-row">${mm.feel > 0 ? '✨' : mm.feel < 0 ? '💭' : '·'} Day ${mm.day}: ${mm.text}</div>`;
+  }
+  rows += `<button id="person-home">🏠 Find home</button> <button id="info-close">Close</button>`;
+  el.innerHTML = rows;
+  document.getElementById('person-home').onclick = () => {
+    if (p.home) panTo(p.home.x * T + p.home.w * 8, p.home.y * T + p.home.h * 8);
+  };
+  document.getElementById('info-close').onclick = hideInfo;
+  wirePersonLinks(el);
+}
+
+function wirePersonLinks(el) {
+  el.querySelectorAll('.p-link').forEach(sp => sp.addEventListener('click', () => {
+    const q = Sim.people.find(o => o.id === +sp.dataset.pid);
+    if (q) { UI.selected = null; UI.selectedPerson = q; showPersonInfo(q); }
+  }));
+}
+
+/* =============== the mayor's report ===============
+   Governance stops being a black box: click the 🗳️ chip to see who runs
+   the place, what they promised, what they built, what the town still
+   needs — and to set the tax pressure yourself. */
+function showMayorPanel() {
+  const el = document.getElementById('info');
+  el.style.display = 'block';
+  UI.selected = null; UI.selectedPerson = null;
+  let rows = '';
+  if (typeof Gov === 'undefined' || (!Gov.leader && !Gov.campaign)) {
+    rows += `<div class="info-title">🗳️ Self-governing</div>`;
+    rows += `<div class="info-row">No mayor yet — the village will hold its first election once six adults live here. Until then, neighbours pool savings for what's needed.</div>`;
+  } else if (Gov.campaign) {
+    rows += `<div class="info-title">🗳️ Election season</div>`;
+    const daysLeft = Math.max(0, Gov.campaign.electionDay - Sim.day);
+    rows += `<div class="info-row">${daysLeft === 0 ? 'POLLS ARE OPEN — results tonight!' : `Voting in ${daysLeft} day${daysLeft > 1 ? 's' : ''}`}</div>`;
+    for (const c of Gov.campaign.candidates)
+      rows += `<div class="info-row">${c.type.emoji} <b>${c.name}</b>${c.incumbent ? ' (incumbent)' : ''} — ${c.promise || c.type.label}</div>`;
+  }
+  if (typeof Gov !== 'undefined' && Gov.leader && !Gov.campaign) {
+    const L = Gov.leader;
+    const mp = L.personId ? Sim.people.find(q => q.id === L.personId) : null;
+    rows += `<div class="info-title">🎩 Mayor ${L.name} ${L.type.emoji}</div>`;
+    rows += `<div class="info-row">${L.type.label} · term ${L.term || 1} · elected with ${L.voteShare || 0}%</div>`;
+    rows += `<div class="info-row">📊 Approval: ${Math.round(Gov.approval)}% · 🏦 Treasury: $${Math.round(Gov.treasury)}</div>`;
+    if (L.promise) rows += `<div class="info-row">🤞 Promised: ${L.promise}</div>`;
+    if ((L.built || []).length) rows += `<div class="info-row">🏗️ Delivered: ${L.built.slice(-4).join(', ')}</div>`;
+    if (mp) rows += `<div class="info-row">🪪 <span class="p-link" data-pid="${mp.id}">Meet the mayor in person</span></div>`;
+    const needs = Gov.assessNeedsList().slice(0, 3);
+    if (needs.length) rows += `<div class="info-row">📋 On the desk: ${needs.map(n => CAT[n].name).join(', ')}</div>`;
+    if (Gov.election && Gov.election.candidates)
+      rows += `<div class="info-row">🗳️ Last election: ${Gov.election.candidates.map(c => `${c.name} ${c.votes}`).join(' · ')}</div>`;
+  }
+  if (typeof Gov !== 'undefined') {
+    rows += `<div class="info-row" style="margin-top:8px">💰 <b>Tax policy</b> (yours to set):</div>`;
+    rows += `<div class="info-row"><select id="tax-select" style="width:100%">
+      <option value="low"${Gov.taxRate === 'low' ? ' selected' : ''}>Low — happy homes, lean treasury</option>
+      <option value="normal"${Gov.taxRate === 'normal' ? ' selected' : ''}>Normal — the steady middle</option>
+      <option value="high"${Gov.taxRate === 'high' ? ' selected' : ''}>High — big projects, grumbling streets</option>
+    </select></div>`;
+  }
+  rows += `<button id="info-close">Close</button>`;
+  el.innerHTML = rows;
+  const sel = document.getElementById('tax-select');
+  if (sel) sel.addEventListener('change', () => {
+    Gov.taxRate = sel.value;
+    toast(`💰 Tax policy set to ${sel.value} — the town hall ledger adjusts`);
+  });
+  document.getElementById('info-close').onclick = hideInfo;
+  wirePersonLinks(el);
+}
 
 /* =============== save / load ===============
    v4: three named slots + a rolling autosave + export/import to file.
@@ -2155,13 +2358,58 @@ document.addEventListener('visibilitychange', () => {
 });
 function newMap() {
   if (!confirm('Start a fresh map? Unsaved progress is lost.')) return;
+  const nm = (prompt('Name your new village:', 'PixelVille') || 'PixelVille').trim();
   World.genStarterMap();
   Sim.reset(); Life.reset(); if (typeof Gov !== 'undefined') Gov.reset();
   if (typeof Calamity !== 'undefined') Calamity.reset();
   if (typeof Festivals !== 'undefined') Festivals.reset();
   Weather.init();
+  setVillageName(nm || 'PixelVille');
   hideInfo(); UI.selected = null;
-  toast('New land discovered 🗺️ — drop a house to begin!');
+  toast(`New land discovered 🗺️ — drop a house and found ${World.name}!`);
+}
+
+/* =============== the village history charts =============== */
+function drawStatsChart() {
+  const cv = document.getElementById('stats-canvas');
+  const g = cv.getContext('2d');
+  g.clearRect(0, 0, cv.width, cv.height);
+  const H = Sim.history || [];
+  g.font = '11px system-ui, sans-serif';
+  if (H.length < 2) {
+    g.fillStyle = '#8a93a8';
+    g.fillText('The chronicle needs a few days of history first — come back tomorrow.', 60, cv.height / 2);
+    return;
+  }
+  const series = [
+    { key: 'pop', label: '👥 Population', color: '#5fae62', max: Math.max(10, ...H.map(h => h.pop)) },
+    { key: 'hap', label: '😊 Happiness %', color: '#f2c14f', max: 100 },
+    { key: 'safe', label: '🛡️ Safety %', color: '#4f9ed0', max: 100 },
+    { key: 'wealth', label: '💰 Wealth', color: '#c05fa8', max: Math.max(100, ...H.map(h => h.wealth)) },
+    { key: 'tre', label: '🏦 Treasury', color: '#e08a3c', max: Math.max(100, ...H.map(h => h.tre)) },
+  ];
+  const x0 = 8, y0 = 8, w = cv.width - 16, h = cv.height - 52;
+  g.fillStyle = 'rgba(255,255,255,0.04)'; g.fillRect(x0, y0, w, h);
+  g.strokeStyle = 'rgba(255,255,255,0.12)';
+  for (let i = 1; i < 4; i++) { g.beginPath(); g.moveTo(x0, y0 + h * i / 4); g.lineTo(x0 + w, y0 + h * i / 4); g.stroke(); }
+  for (const s of series) {
+    g.strokeStyle = s.color; g.lineWidth = 1.6; g.beginPath();
+    H.forEach((pt, i) => {
+      const px = x0 + (i / (H.length - 1)) * w;
+      const py = y0 + h - (Math.min(pt[s.key], s.max) / s.max) * h;
+      i === 0 ? g.moveTo(px, py) : g.lineTo(px, py);
+    });
+    g.stroke();
+  }
+  // legend + the span of days covered
+  let lx = x0 + 2;
+  for (const s of series) {
+    g.fillStyle = s.color; g.fillRect(lx, y0 + h + 12, 9, 9);
+    g.fillStyle = '#c8cede'; g.fillText(s.label, lx + 13, y0 + h + 20);
+    lx += g.measureText(s.label).width + 34;
+  }
+  g.fillStyle = '#8a93a8';
+  g.fillText(`Day ${H[0].d} → ${H[H.length - 1].d}`, x0 + 2, y0 + h + 38);
 }
 
 /* =============== main loop =============== */
@@ -2230,7 +2478,10 @@ function frame(now) {
     if (typeof Tasks !== 'undefined') { Tasks.render(); Tasks.badge(); }
     if (typeof News !== 'undefined') News.tick(now);
     if (UI.selected && document.getElementById('info').style.display === 'block') showInfo(UI.selected);
+    else if (UI.selectedPerson && document.getElementById('info').style.display === 'block') showPersonInfo(UI.selectedPerson);
   }
+  // the founding of the village pans the camera to the very first doorstep
+  if (Sim.welcomeAt) { panTo(Sim.welcomeAt.x, Sim.welcomeAt.y); Sim.welcomeAt = null; }
   requestAnimationFrame(frame);
 }
 
@@ -2357,6 +2608,16 @@ function boot() {
   document.getElementById('settings-close').addEventListener('click', closeSettings);
   document.getElementById('set-vol').addEventListener('input', e => Snd.setVolume(+e.target.value));
   setVillageName(World.name || 'PixelVille');
+  // history charts
+  document.getElementById('btn-stats').addEventListener('click', () => {
+    drawStatsChart();
+    document.getElementById('statsui').style.display = 'flex';
+  });
+  document.getElementById('statsui-close').addEventListener('click', () =>
+    document.getElementById('statsui').style.display = 'none');
+  // the mayor's report opens from the leadership chip
+  const lw = document.getElementById('stat-leader-wrap');
+  if (lw) { lw.style.cursor = 'pointer'; lw.addEventListener('click', showMayorPanel); }
   // the village task book
   document.getElementById('btn-journal').addEventListener('click', () => Tasks.toggle());
   document.getElementById('journal-close').addEventListener('click', () => Tasks.toggle());

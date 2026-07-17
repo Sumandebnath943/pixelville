@@ -67,12 +67,22 @@ const Weather = {
       [['clear', 22], ['clouds', 32], ['rain', 30], ['heavy', 16]],   // autumn
       [['clear', 26], ['clouds', 30], ['snow', 44]],                  // winter
     ];
-    const table = tables[this.season];
-    let sum = 0; for (const [, w] of table) sum += w;
-    let r = Math.random() * sum;
-    for (const [k, w] of table) { r -= w; if (r <= 0) { this.kind = k; break; } }
+    const pick = () => {
+      const table = tables[this.season];
+      let sum = 0; for (const [, w] of table) sum += w;
+      let r = Math.random() * sum;
+      for (const [k, w] of table) { r -= w; if (r <= 0) return k; }
+      return 'clear';
+    };
+    // the forecast is HONEST: what was promised arrives, and the next spell
+    // is rolled ahead of time so the HUD can whisper what's coming
+    this.kind = this.next || pick();
+    this.next = pick();
     this.target = { clear: 0, clouds: 0.15, rain: 0.55, heavy: 1, snow: 0.75 }[this.kind];
     this.nextChange = 100 + Math.random() * 260; // game-minutes
+  },
+  forecastEmoji() {
+    return { clear: '☀️', clouds: '⛅', rain: '🌧️', heavy: '⛈️', snow: '🌨️' }[this.next] || '';
   },
 
   tick(dtSim, dtReal, onSeasonChange) {
