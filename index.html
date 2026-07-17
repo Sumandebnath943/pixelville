@@ -37,10 +37,12 @@
       </span>
       <span id="filebtns">
         <button id="btn-journal" title="Task book & village news">📖<span id="journal-badge"></span></button>
+        <button id="btn-stats" title="Village history charts">📈</button>
         <button id="btn-sound" title="Sound on/off">🔊</button>
-        <button id="btn-save" title="Save to browser">💾</button>
-        <button id="btn-load" title="Load save">📂</button>
+        <button id="btn-save" title="Save village">💾</button>
+        <button id="btn-load" title="Load village">📂</button>
         <button id="btn-new" title="New map">🗺️</button>
+        <button id="btn-settings" title="Settings">⚙️</button>
         <button id="btn-help" title="Help">❔</button>
       </span>
     </div>
@@ -78,6 +80,54 @@
       <canvas id="minimap" width="128" height="128" title="Click to jump"></canvas>
     </div>
 
+    <div id="settings" class="modal">
+      <div class="modal-card">
+        <h1>⚙️ Settings</h1>
+        <div class="set-row"><label>Village name</label><input id="set-name" maxlength="24" spellcheck="false"></div>
+        <div class="set-row"><label>Growth pace</label>
+          <select id="set-pace">
+            <option value="cozy">Cozy — slow &amp; steady (recommended)</option>
+            <option value="normal">Normal</option>
+            <option value="bustling">Bustling — fast growth</option>
+          </select></div>
+        <div class="set-row"><label>Christmas fast-forward lock</label>
+          <select id="set-xmas">
+            <option value="eve">Only Christmas Eve &amp; Day</option>
+            <option value="season">The whole festive week</option>
+            <option value="off">Never lock</option>
+          </select></div>
+        <div class="set-row"><label>Sound volume</label><input id="set-vol" type="range" min="0" max="1" step="0.05"></div>
+        <div class="set-row"><label>Autosave</label>
+          <select id="set-autosave">
+            <option value="2">Every 2 minutes</option>
+            <option value="5">Every 5 minutes</option>
+            <option value="0">Off</option>
+          </select></div>
+        <button id="settings-close">Done</button>
+      </div>
+    </div>
+
+    <div id="saveui" class="modal">
+      <div class="modal-card">
+        <h1 id="saveui-title">💾 Save village</h1>
+        <div id="saveui-slots"></div>
+        <div class="set-row" id="saveui-filerow">
+          <button id="saveui-export">⬇️ Export to file</button>
+          <button id="saveui-import">⬆️ Import from file</button>
+          <input id="saveui-file" type="file" accept=".json,application/json" style="display:none">
+        </div>
+        <button id="saveui-close">Close</button>
+      </div>
+    </div>
+
+    <div id="statsui" class="modal">
+      <div class="modal-card">
+        <h1>📈 Village history</h1>
+        <canvas id="stats-canvas" width="460" height="300"></canvas>
+        <button id="statsui-close">Close</button>
+      </div>
+    </div>
+
     <div id="help">
       <div id="help-card">
         <h1>🏘️ Welcome to PixelVille</h1>
@@ -105,6 +155,7 @@
   </main>
 </div>
 
+<script src="js/settings.js"></script>
 <script src="js/tasks.js"></script>
 <script src="js/sprites.js"></script>
 <script src="js/world.js"></script>

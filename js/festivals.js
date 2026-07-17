@@ -42,6 +42,16 @@ const Festivals = {
   isDiwali() { const d = this.yearDay(); return d === 18 || d === 19; },
   isChristmasSeason() { return this.yearDay() >= 22; },   // the whole of winter
   decorated() { return this.isChristmasSeason(); },        // lights on every building
+  /* does the season lock fast-forward right now? The player chooses how much
+     of Christmas is savoured at 1x: just Eve & Day (default), the whole
+     festive week, or not at all. */
+  speedLocked() {
+    const mode = typeof Settings !== 'undefined' ? Settings.get('xmasLock') : 'eve';
+    if (mode === 'off') return false;
+    if (mode === 'season') return this.isChristmasSeason();
+    const d = this.yearDay();
+    return d === 24 || d === 25;
+  },
   diyasTonight() { return this.isDiwali(); },
   fireworksNight() {
     const d = this.yearDay();

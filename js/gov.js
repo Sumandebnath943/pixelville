@@ -668,6 +668,9 @@ const Gov = {
     // a single fire is remembered long enough for the village to act on it
     if (typeof Life !== 'undefined' && Life.firesRecent >= 0.5 && !this.hasPlanned('fire')) needs.push('fire');
     if (typeof Life !== 'undefined' && Life.crimes >= 2 && !this.hasPlanned('police')) needs.push('police');
+    // a real town wants a police station BEFORE the first crime wave — without
+    // one, every dispute, crash and alarm goes unanswered
+    if (pop >= 25 && !this.hasPlanned('police') && !needs.includes('police')) needs.push('police');
     // a growing city needs a station in EVERY district, not just one downtown
     // — but never more stations than a town this size can staff
     for (const svc of ['police', 'fire']) {
@@ -895,20 +898,28 @@ const Gov = {
   communityBuild(need, urgent) {
     if (this.countOf(need) >= this.civicCap(need)) return false; // the hard rule
     const cost = CIVIC_COSTS[need] || STARTUP_COSTS[need] || 220;
-    const homes = World.buildings.filter(b => CAT[b.type].res && b.residents.length && b.funds > 8 && !b.ruined);
-    const pool = homes.reduce((sum, b) => sum + b.funds, 0);
-    if (pool < cost * (urgent ? 1.0 : 1.15)) return false; // a poor village needs time to save
+    // town hall chips in first when it can — an endless whip-round used to
+    // tax households so hard (40% of savings, near-daily) that nobody could
+    // ever afford an extra floor, a second car or a mansion. While the
+    // treasury is saving for the railway, the community pays its own way.
+    const railSaving = this.leader && Sim.people.length >= 45 && this.countOf('trainstation') === 0;
+    const fromTreasury = this.leader && !railSaving ? Math.min(this.treasury, cost * 0.5) : 0;
+    const homes = World.buildings.filter(b => CAT[b.type].res && b.residents.length && b.funds > 25 && !b.ruined);
+    const pool = homes.reduce((sum, b) => sum + Math.max(0, (b.funds - 20) * 0.25), 0);
+    if (fromTreasury + pool < cost * (urgent ? 1.0 : 1.1)) return false; // a poor village needs time to save
     const target = COVERAGE_RADIUS[need] && this.hasPlanned(need) ? this.coverageGap(need) : null;
     const spot = World.findPlannedSpot(need, target);
     if (!spot) return false;
     const b = World.placeBuilding(need, spot.x, spot.y);
     if (!b) return false;
-    let due = cost;
+    this.treasury -= fromTreasury;
+    let due = cost - fromTreasury;
     for (const home of homes) {
-      const share = Math.min(home.funds * 0.4, due / homes.length + 6);
+      if (due <= 0) break;
+      const share = Math.min((home.funds - 20) * 0.25, due / homes.length + 5);
+      if (share <= 0) continue;
       home.funds -= share;
       due -= share;
-      if (due <= 0) break;
     }
     World.refreshConnections();
     // close the task book entry NOW — the timers reset below, so the timer-gated

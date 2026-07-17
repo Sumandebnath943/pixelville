@@ -10,6 +10,7 @@ const MSIZE = 11; // mountain footprint (tiles) — mountains are MASSIVE now
 const MIN_PER_SEC = 4; // game-minutes per real second at 1x — one day ≈ 6 real minutes
 
 const World = {
+  name: 'PixelVille',                  // the village's name — travels with the save
   ground: new Uint8Array(GW * GH),
   tree: new Uint8Array(GW * GH),      // 0 none, 1..3 tree variant
   roadMap: new Uint8Array(GW * GH),   // 0/1

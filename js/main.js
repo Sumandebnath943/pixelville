@@ -1731,13 +1731,17 @@ canvas.addEventListener('wheel', e => {
 }, { passive: false });
 
 window.addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   const pan = 26 / UI.zoom * 8;
   if (e.key === 'ArrowLeft' || e.key === 'a') UI.camX -= pan;
   if (e.key === 'ArrowRight' || e.key === 'd') UI.camX += pan;
   if (e.key === 'ArrowUp' || e.key === 'w') UI.camY -= pan;
   if (e.key === 'ArrowDown' || e.key === 's') UI.camY += pan;
-  if (e.key === 'Escape') { setTool(null); hideInfo(); }
+  if (e.key === 'Escape') {
+    setTool(null); hideInfo();
+    for (const id of ['settings', 'saveui', 'statsui'])
+      document.getElementById(id).style.display = 'none';
+  }
   if (e.key === ' ') { e.preventDefault(); setSpeed(UI.speedIdx === 0 ? 1 : 0); }
   if (e.key >= '1' && e.key <= '4') setSpeed(+e.key - 1);
   if (e.key === 'h' || e.key === 'H') toggleSidebar();
@@ -1828,8 +1832,8 @@ function updateHUD() {
   const seasonDay = ((Sim.day - 1) % 7) + 1;
   document.getElementById('clock').textContent =
     `Day ${Sim.day} · ${WEEKDAYS[Sim.day % 7]} ${seasonDay} ${SEASONS[Weather.season]}, Yr ${vYear} · ${Sim.timeStr()}`;
-  // Christmas month runs in real time: fast-forward stays locked all season
-  const xmasLock = typeof Festivals !== 'undefined' && Festivals.isChristmasSeason();
+  // Christmas runs in real time: fast-forward locks per the player's setting
+  const xmasLock = typeof Festivals !== 'undefined' && Festivals.speedLocked();
   document.querySelectorAll('#speed button').forEach((b, n) => b.classList.toggle('locked', xmasLock && n >= 2));
   document.getElementById('chip-season').textContent = Weather.label();
   document.getElementById('chip-weather').textContent = Weather.weatherLabel();
@@ -1904,10 +1908,10 @@ function updateMinimap() {
 }
 
 function setSpeed(i) {
-  // Christmas is savoured, not skipped: fast-forward closes for the season
-  if (i > 1 && typeof Festivals !== 'undefined' && Festivals.isChristmasSeason()) {
+  // Christmas is savoured, not skipped: fast-forward closes per the setting
+  if (i > 1 && typeof Festivals !== 'undefined' && Festivals.speedLocked()) {
     if (UI.speedIdx !== 1) i = 1;
-    else { toast('🎄 Christmas runs at its own unhurried pace — fast-forward reopens in the new year'); i = 1; }
+    else { toast('🎄 Christmas runs at its own unhurried pace — fast-forward reopens after the celebrations'); i = 1; }
   }
   UI.speedIdx = i;
   document.querySelectorAll('#speed button').forEach((b, n) => b.classList.toggle('active', n === i));
@@ -2061,8 +2065,8 @@ function frame(now) {
     if (typeof Calamity !== 'undefined') Calamity.tick(dt * spd);
     if (typeof Festivals !== 'undefined') Festivals.tick(dt * spd);
   }
-  // the season can begin while fast-forwarding — rein the clock back in
-  if (typeof Festivals !== 'undefined' && Festivals.isChristmasSeason() && UI.speedIdx > 1) setSpeed(1);
+  // the lock can begin while fast-forwarding — rein the clock back in
+  if (typeof Festivals !== 'undefined' && Festivals.speedLocked() && UI.speedIdx > 1) setSpeed(1);
   // ribbon-cuttings: construction sites that just finished
   while (Sim.completed.length) {
     const b = Sim.completed.shift();
@@ -2122,6 +2126,31 @@ function resize() {
   canvas.height = wrap.clientHeight;
   ctx.imageSmoothingEnabled = false;
   clampCam();
+}
+
+/* =============== village name & settings panel =============== */
+function setVillageName(name) {
+  World.name = name.slice(0, 24);
+  const logo = document.querySelector('#logo span:last-child');
+  if (logo) logo.textContent = World.name;
+  document.title = `${World.name} — drag & drop village builder`;
+}
+
+function openSettings() {
+  document.getElementById('set-name').value = World.name || 'PixelVille';
+  document.getElementById('set-pace').value = Settings.get('growthPace');
+  document.getElementById('set-xmas').value = Settings.get('xmasLock');
+  document.getElementById('set-vol').value = Settings.get('volume');
+  document.getElementById('set-autosave').value = String(Settings.get('autosaveMin'));
+  document.getElementById('settings').style.display = 'flex';
+}
+function closeSettings() {
+  const nm = document.getElementById('set-name').value.trim();
+  if (nm && nm !== World.name) { setVillageName(nm); toast(`🏷️ The village is now called ${World.name}`); }
+  Settings.set('growthPace', document.getElementById('set-pace').value);
+  Settings.set('xmasLock', document.getElementById('set-xmas').value);
+  Settings.set('autosaveMin', +document.getElementById('set-autosave').value);
+  document.getElementById('settings').style.display = 'none';
 }
 
 /* =============== sidebar collapse =============== */
@@ -2189,6 +2218,11 @@ function boot() {
   const sb = document.getElementById('btn-sound');
   sb.textContent = Snd.enabled ? '🔊' : '🔇';
   sb.addEventListener('click', () => { Snd.start(); sb.textContent = Snd.toggle() ? '🔊' : '🔇'; });
+  // settings panel
+  document.getElementById('btn-settings').addEventListener('click', openSettings);
+  document.getElementById('settings-close').addEventListener('click', closeSettings);
+  document.getElementById('set-vol').addEventListener('input', e => Snd.setVolume(+e.target.value));
+  setVillageName(World.name || 'PixelVille');
   // the village task book
   document.getElementById('btn-journal').addEventListener('click', () => Tasks.toggle());
   document.getElementById('journal-close').addEventListener('click', () => Tasks.toggle());

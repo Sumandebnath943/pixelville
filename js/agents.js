@@ -739,7 +739,7 @@ const Sim = {
       }
       const say = m => { if (typeof Life !== 'undefined') Life.say(m); };
       const name = b.residents[0].surname;
-      if (Math.random() < 0.002) { b.funds += 600; say(`🎉 The ${name}s won the lottery! (+$600)`); }
+      if (Math.random() < 0.0012) { b.funds += 400; say(`🎉 The ${name}s won the lottery! (+$400)`); }
       // home improvements
       if (b.type === 'house' && !b.upgrading) {
         if (b.level === 1 && b.funds >= 250) { b.funds -= 180; b.upgrading = 240; say(`🔨 The ${name}s are adding a floor to their house`); }
@@ -995,7 +995,8 @@ const Sim = {
   tickPioneers() {
     if (this.day < (this.nextPioneerDay || 0) || this.people.length < 14) return;
     this.nextPioneerDay = this.day + 6 + ((Math.random() * 6) | 0);
-    if (Math.random() < 0.4) return; // not every season produces a dreamer
+    const paceMult = typeof Settings !== 'undefined' ? Settings.growthMult() : 1;
+    if (Math.random() > 0.45 * paceMult + 0.15) return; // not every season produces a dreamer
     const say = m => { if (typeof Life !== 'undefined') Life.say(m); };
     const c = typeof Gov !== 'undefined' ? Gov.townCenter() : { x: GW >> 1, y: GH >> 1 };
     const key = Math.random() < 0.5 ? 'house' : 'cottage';
@@ -1277,11 +1278,13 @@ const Sim = {
 
   /* the town grows on its own when jobs outstrip housing */
   checkGrowth() {
-    // families move into vacant homes when there is work to be had
+    // families move into vacant homes when there is work to be had — at the
+    // pace the player chose (Cozy damps growth as the town fills out)
+    const paceMult = typeof Settings !== 'undefined' ? Settings.growthMult() : 1;
     const s = this.stats();
     const vacantHomes = World.buildings.filter(b => CAT[b.type].res && !b.construction && !b.ruined &&
       b.connected && b.residents.length === 0);
-    if (vacantHomes.length && s.jobs - s.employed > 2 && Math.random() < 0.5) {
+    if (vacantHomes.length && s.jobs - s.employed > 2 && Math.random() < 0.5 * paceMult) {
       const home = vacantHomes[(Math.random() * vacantHomes.length) | 0];
       const fam = this.spawnFamily(home);
       home.funds = Math.max(home.funds, 40 + Math.random() * 60);
@@ -1294,7 +1297,7 @@ const Sim = {
     if (underCon >= 3) return; // a few housing projects can run side by side now
     const vacant = vacantHomes.length;
     const unfilled = s.jobs - s.employed;
-    if (unfilled > 3 && vacant === 0 && Math.random() < 0.45) {
+    if (unfilled > 3 && vacant === 0 && Math.random() < 0.45 * Math.max(0.25, paceMult)) {
       const key = unfilled > 14 && this.people.length > 26 ? 'apartment' :
         (unfilled > 8 && Math.random() < 0.4 ? 'rowhouse' : 'house');
       const spot = World.findPlannedSpot(key);

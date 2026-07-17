@@ -20,7 +20,7 @@ const Snd = {
     } catch (e) { return; }
     const c = this.ctx;
     this.master = c.createGain();
-    this.master.gain.value = this.enabled ? 0.5 : 0;
+    this.master.gain.value = this.enabled ? this.vol() : 0;
     this.master.connect(c.destination);
 
     // shared noise buffer
@@ -56,11 +56,18 @@ const Snd = {
     this.crickets = cg;
   },
 
+  vol() { return typeof Settings !== 'undefined' ? Settings.get('volume') : 0.5; },
+
   toggle() {
     this.enabled = !this.enabled;
     localStorage.setItem('pixelville-snd', this.enabled ? '1' : '0');
-    if (this.master) this.master.gain.linearRampToValueAtTime(this.enabled ? 0.5 : 0, this.ctx.currentTime + 0.2);
+    if (this.master) this.master.gain.linearRampToValueAtTime(this.enabled ? this.vol() : 0, this.ctx.currentTime + 0.2);
     return this.enabled;
+  },
+
+  setVolume(v) {
+    if (typeof Settings !== 'undefined') Settings.set('volume', v);
+    if (this.master && this.enabled) this.master.gain.linearRampToValueAtTime(v, this.ctx.currentTime + 0.1);
   },
 
   /* smooth ambience follows the world state; call every frame */
