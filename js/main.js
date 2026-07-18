@@ -12,6 +12,7 @@ const ctx = canvas.getContext('2d');
 
 const UI = {
   zoom: 2, camX: 0, camY: 0,
+  panKeys: new Set(), panVX: 0, panVY: 0,  // smooth WASD camera drive
   speedIdx: 1, speeds: [0, 1, 3, 8],
   tool: null, hover: null, dragStart: null,
   panning: false, panStart: null,
@@ -1741,13 +1742,21 @@ canvas.addEventListener('wheel', e => {
   else { UI.camX += e.deltaX / UI.zoom; UI.camY += e.deltaY / UI.zoom; clampCam(); } // trackpad pan
 }, { passive: false });
 
+// which of WASD / arrows a keyboard event refers to (null if none)
+function panDir(key) {
+  switch (key) {
+    case 'ArrowLeft': case 'a': case 'A': return 'left';
+    case 'ArrowRight': case 'd': case 'D': return 'right';
+    case 'ArrowUp': case 'w': case 'W': return 'up';
+    case 'ArrowDown': case 's': case 'S': return 'down';
+    default: return null;
+  }
+}
+
 window.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  const pan = 26 / UI.zoom * 8;
-  if (e.key === 'ArrowLeft' || e.key === 'a') UI.camX -= pan;
-  if (e.key === 'ArrowRight' || e.key === 'd') UI.camX += pan;
-  if (e.key === 'ArrowUp' || e.key === 'w') UI.camY -= pan;
-  if (e.key === 'ArrowDown' || e.key === 's') UI.camY += pan;
+  const dir = panDir(e.key);
+  if (dir) { UI.panKeys.add(dir); e.preventDefault(); }  // held keys drive the camera in frame()
   if (e.key === 'Escape') {
     setTool(null); hideInfo();
     for (const id of ['settings', 'saveui', 'statsui', 'newmap'])
@@ -1757,8 +1766,35 @@ window.addEventListener('keydown', e => {
   if (e.key >= '1' && e.key <= '4') setSpeed(+e.key - 1);
   if (e.key === 'h' || e.key === 'H') toggleSidebar();
   if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undoBulldoze(); }
-  clampCam();
 });
+
+window.addEventListener('keyup', e => {
+  const dir = panDir(e.key);
+  if (dir) UI.panKeys.delete(dir);
+});
+// dropping focus (alt-tab, dialog) must not leave a key "stuck" panning
+window.addEventListener('blur', () => { UI.panKeys.clear(); });
+
+// smoothly ease the camera toward the WASD/arrow input each frame (Age-of-Empires drive)
+function panCamera(dt) {
+  const ax = (UI.panKeys.has('right') ? 1 : 0) - (UI.panKeys.has('left') ? 1 : 0);
+  const ay = (UI.panKeys.has('down') ? 1 : 0) - (UI.panKeys.has('up') ? 1 : 0);
+  // target velocity in world px/s — scaled by zoom so on-screen speed feels constant
+  const speed = 900 / UI.zoom;
+  const tvx = ax * speed, tvy = ay * speed;
+  // exponential approach: quick to get moving, gentle glide to a stop
+  const k = 1 - Math.exp(-dt * 12);
+  UI.panVX += (tvx - UI.panVX) * k;
+  UI.panVY += (tvy - UI.panVY) * k;
+  if (UI.panVX || UI.panVY) {
+    UI.camX += UI.panVX * dt;
+    UI.camY += UI.panVY * dt;
+    // snap tiny residual velocity to zero so it settles cleanly
+    if (!ax && Math.abs(UI.panVX) < 0.5) UI.panVX = 0;
+    if (!ay && Math.abs(UI.panVY) < 0.5) UI.panVY = 0;
+    clampCam();
+  }
+}
 
 function clampCam() {
   const vw = canvas.width / UI.zoom, vh = canvas.height / UI.zoom;
@@ -2460,6 +2496,7 @@ function frame(now) {
     for (const m of Sim.onBuildingAdded(b)) toast(m);
   }
   Weather.tick(dt * spd, dt, s => toast(`${SEASON_EMOJI[s]} ${SEASONS[s]} has arrived`));
+  panCamera(dt);
   render(now);
 
   /* ambience & event sounds */
