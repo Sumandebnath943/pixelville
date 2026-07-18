@@ -91,6 +91,7 @@ const Gov = {
     this.campaign = null;
     this.officeTimer = 0;
     this.nextRailDay = 0;
+    this.nextBusDay = 0;
   },
 
   say(message) { if (typeof Life !== 'undefined') Life.say(message); },
@@ -569,9 +570,67 @@ const Gov = {
     else if (Math.random() < (urgentNow ? 0.85 : 0.36 * L.type.zeal))
       this.spend();
     this.planRailways();
+    this.planBusNetwork();
     this.consolidateServices();
 
     if (this.riotCd > 0) this.riotCd--;
+  },
+
+  /* ---------- the bus network ----------
+     The town rolls out bus shelters on its own wherever riders are far from
+     any stop, keeping shelters a sensible distance apart so a real loop can
+     form. Two stops are seeded on the first pass, since one alone runs no line. */
+  planBusNetwork() {
+    const pop = Sim.people.length;
+    if (pop < 22 || Sim.day < (this.nextBusDay || 0)) return;
+    this.nextBusDay = Sim.day + 2;
+    const MIN_STOP_DIST = 12;   // shelters shouldn't crowd one another
+    const REACH = 16;           // how far a home will walk to catch the bus
+    const stops = World.buildings.filter(b => b.type === 'busstop' && !b.ruined);
+    const maxStops = Math.min(8, 2 + ((pop / 30) | 0));
+    if (stops.length >= maxStops) return;
+    const cost = CIVIC_COSTS.busstop;
+    if (this.treasury < cost * 2 + 100) return;
+    // homes & places people go to that no existing stop is within walking reach of
+    const riders = World.buildings.filter(b => b.connected && !b.ruined && !b.construction &&
+      (CAT[b.type].res || CAT[b.type].visit) && b.type !== 'busstop');
+    const farFromStop = b => stops.every(s => Math.abs(s.x - b.x) + Math.abs(s.y - b.y) > REACH);
+    const uncovered = riders.filter(farFromStop);
+    if (uncovered.length < (stops.length === 0 ? 4 : 6)) return;
+    // aim the shelter at the densest cluster of un-served buildings
+    let best = null, bestN = -1;
+    for (const b of uncovered) {
+      let n = 0;
+      for (const o of uncovered) if (Math.abs(o.x - b.x) + Math.abs(o.y - b.y) <= 14) n++;
+      if (n > bestN) { bestN = n; best = b; }
+    }
+    if (!best) return;
+    const tooClose = (x, y) => World.buildings.some(b => b.type === 'busstop' && !b.ruined &&
+      Math.abs(b.x - x) + Math.abs(b.y - y) < MIN_STOP_DIST);
+    // keep shelters (and their queues) clear of the railway
+    const nearRail = (x, y) => {
+      for (let j = -1; j <= 2; j++) for (let i = -1; i <= 2; i++) if (World.isRail(x + i, y + j)) return true;
+      return false;
+    };
+    // first-ever pass seeds two shelters (best cluster + town centre) so a line exists
+    const need = stops.length === 0 ? 2 : 1;
+    const anchors = need === 2 ? [best, this.townCenter()] : [best];
+    let placed = 0;
+    for (const anchor of anchors) {
+      if (this.treasury < cost) break;
+      const spot = World.findPlannedSpot('busstop', { x: anchor.x, y: anchor.y });
+      if (!spot || tooClose(spot.x, spot.y) || nearRail(spot.x, spot.y)) continue;
+      const b = World.placeBuilding('busstop', spot.x, spot.y);
+      if (!b) continue;
+      this.treasury -= cost;
+      placed++;
+    }
+    if (placed) {
+      this.recentBuilds += 1;
+      World.refreshConnections();
+      if (typeof Life !== 'undefined') Life.busT = 0;   // re-plan the loop right away
+      this.say(`🚏 The council put in ${placed > 1 ? placed + ' new bus shelters' : 'a new bus shelter'} for the ${this.districtName(best.x, best.y)}.`);
+    }
   },
 
   /* ---------- the railway programme ----------
@@ -1026,6 +1085,7 @@ const Gov = {
       election: this.election,
       taxRate: this.taxRate,
       nextRailDay: this.nextRailDay || 0,
+      nextBusDay: this.nextBusDay || 0,
     };
   },
 
@@ -1058,5 +1118,6 @@ const Gov = {
     this.election = g.election || null;
     this.taxRate = g.taxRate || 'normal';
     this.nextRailDay = g.nextRailDay || 0;
+    this.nextBusDay = g.nextBusDay || 0;
   },
 };

@@ -512,11 +512,15 @@ function render(now) {
   if (typeof Gov !== 'undefined' && Gov.campaign && Gov.campaign.camps)
     for (const cp of Gov.campaign.camps) ents.push({ kind: 'camp', cp, base: (cp.y + 1) * T });
   if (Life.votingBooths) ents.push({ kind: 'voting', vb: Life.votingBooths, base: Life.votingBooths.y + 14 });
-  // waiting passengers at bus shelters
-  if (Life.buses.length)
-    for (const b of World.buildings)
-      if (b.type === 'busstop' && b.connected && !b.construction && !b.ruined)
-        ents.push({ kind: 'busqueue', b, base: (b.y + b.h) * T + 1 });
+  // cruising cabs, riders alighting, and the queues waiting at every stop
+  for (const cab of Life.taxis) ents.push({ kind: 'taxi', u: cab, base: cab.y + 4 });
+  for (const a of Life.alighters) ents.push({ kind: 'alighter', a, base: a.y + 4 });
+  for (const [id, q] of Life.stopQueues) {
+    if (!q.waiting.length) continue;
+    const b = World.buildings.find(bb => bb.id === id);
+    if (!b || b.ruined || b.construction) continue;
+    ents.push({ kind: 'stopqueue', b, q, base: (b.y + b.h) * T + 1 });
+  }
   ents.sort((a, b) => a.base - b.base);
 
   const frame = Math.floor(now / 160) % 2;
@@ -905,6 +909,20 @@ function render(now) {
       if (u.dirx !== 0) ctx.drawImage(SPR.bus.h, Math.round(u.x) - 8, Math.round(u.y) - 4);
       else ctx.drawImage(SPR.bus.v, Math.round(u.x) - 4, Math.round(u.y) - 8);
       if (dark > 0.1) UI.lights.push({ x: u.x + (u.dirx || 0) * 5, y: u.y + (u.diry || 0) * 5, r: 17, a: 0.8, cone: true, dirx: u.dirx, diry: u.diry });
+    } else if (e.kind === 'taxi') {
+      const u = e.u;
+      shadow(u.x, u.y + 3, 6, 2.2);
+      if (u.dirx !== 0) ctx.drawImage(SPR.taxi.h, Math.round(u.x) - 6, Math.round(u.y) - 4);
+      else ctx.drawImage(SPR.taxi.v, Math.round(u.x) - 4, Math.round(u.y) - 6);
+      // a small silhouette in the back seat when the cab has a fare aboard
+      if (u.pax && u.pax.length) { ctx.fillStyle = 'rgba(30,32,40,0.75)'; ctx.fillRect(Math.round(u.x) - 1, Math.round(u.y) - 2, 2, 2); }
+      if (dark > 0.1) UI.lights.push({ x: u.x + (u.dirx || 0) * 4, y: u.y + (u.diry || 0) * 4, r: 14, a: 0.6, cone: true, dirx: u.dirx, diry: u.diry });
+    } else if (e.kind === 'alighter') {
+      const a = e.a, spr = SPR.person(a.kind, a.seed);
+      const fade = Math.min(1, a.life / 1.2);
+      ctx.globalAlpha = fade;
+      ctx.drawImage(spr.f[Math.floor(a.ph) % 2], Math.round(a.x) - 3, Math.round(a.y) - spr.h);
+      ctx.globalAlpha = 1;
     } else if (e.kind === 'traincar') {
       const tr = e.u;
       const o = { x: tr.x, y: tr.y, dirx: tr.dirx, diry: tr.diry };
@@ -1206,12 +1224,18 @@ function render(now) {
       }
       ctx.font = '8px "Segoe UI Emoji", serif';
       ctx.fillText('🗳️', vb.x - 4, vb.y - 10);
-    } else if (e.kind === 'busqueue') {
-      const b = e.b;
-      const n = 1 + (b.id + Math.floor(now / 60000)) % 2;
-      for (let k = 0; k < n; k++) {
-        const spr = SPR.person(['man', 'woman', 'kid'][(b.id + k) % 3], b.id * 13 + k * 7);
-        ctx.drawImage(spr.f[0], b.x * T - 4 - k * 6, (b.y + b.h) * T - spr.h - 1);
+    } else if (e.kind === 'stopqueue') {
+      // the line of passengers waiting on the pavement beside the shelter
+      const b = e.b, waiting = e.q.waiting;
+      const shift = Math.floor(now / 900) % 2;
+      const baseX = b.x * T, baseY = (b.y + b.h) * T;
+      for (let k = 0; k < waiting.length; k++) {
+        const w = waiting[k];
+        const px = baseX - 5 - k * 6;
+        // don't let the queue spill onto a railway tile beside the stop
+        if (World.isRail(((px + 3) / T) | 0, ((baseY - 2) / T) | 0)) continue;
+        const spr = SPR.person(w.kind, w.seed);
+        ctx.drawImage(spr.f[(k + shift + (w.seed & 1)) % 2], px, baseY - spr.h - 1 + (k % 2));
       }
     } else if (e.kind === 'duck') {
       const dk = e.dk;

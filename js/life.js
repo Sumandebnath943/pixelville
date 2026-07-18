@@ -31,6 +31,8 @@ const Life = {
     this.riot = null; this.roadworks = []; this.workT = 200;
     this.rally = null;
     this.buses = []; this.busSig = ''; this.busT = 0;
+    this.taxis = []; this.taxiSig = ''; this.taxiT = 0;
+    this.stopQueues = new Map(); this.alighters = []; this.queueT = 0;
     this.trains = []; this.trainSig = ''; this.trainT = 0;
     this.boats = []; this.ferry = null; this.ferrySig = '';
     this.helis = []; this.heliCd = 300;
@@ -61,6 +63,8 @@ const Life = {
     this.tickRally(dtSim);
     this.tickSky(dtSim, dtReal);
     this.tickBuses(dtSim);
+    this.tickTaxis(dtSim);
+    this.tickTransitQueues(dtSim);
     this.tickTrains(dtSim);
     this.tickBoats(dtSim);
     this.tickHelis(dtSim, dtReal);
@@ -354,9 +358,9 @@ const Life = {
             const nBuses = Math.min(3, 1 + ((chain.length / 3) | 0));
             for (let k = 0; k < nBuses; k++)
               this.buses.push({
-                route, stopIdx, prog: (route.length - 1) * (k / nBuses), dir: 1,
+                route, stopIdx, stops: chain, prog: (route.length - 1) * (k / nBuses), dir: 1,
                 pause: 0, x: route[0][0] * T + 8, y: route[0][1] * T + 8, dirx: 1, diry: 0,
-                lastStop: -1,
+                lastStop: -1, pax: [], cap: 6,
               });
             this.say(`🚌 The village bus line is running — ${chain.length} stops on the loop!`);
           }
@@ -374,11 +378,163 @@ const Life = {
       bus.prog += 1.9 * dt * bus.dir;
       if (bus.prog >= bus.route.length - 1) { bus.prog = bus.route.length - 1; bus.dir = -1; bus.pause = 5; }
       if (bus.prog <= 0) { bus.prog = 0; bus.dir = 1; bus.pause = 5; }
-      // brief stop at each bus shelter on the way
+      // brief stop at each bus shelter on the way — real passengers get on & off
       const at = Math.round(bus.prog);
-      if (bus.stopIdx.includes(at) && at !== bus.lastStop) { bus.lastStop = at; bus.pause = 4; }
+      if (bus.stopIdx.includes(at) && at !== bus.lastStop) {
+        bus.lastStop = at; bus.pause = 4;
+        const stop = bus.stops[bus.stopIdx.indexOf(at)];
+        if (stop) this.serveStop(bus, stop);
+      }
       this.followPath(bus, bus.route, bus.prog, 3.5);
     }
+  },
+
+  /* ---------------- taxi cabs cruising from the ranks ---------------- */
+  taxis: [], taxiSig: '', taxiT: 0,
+  /* the road tile a building meets the street on — where a cab picks up */
+  streetTile(b) {
+    const d = b.door;
+    if (World.isRoad(d.x, d.y)) return { x: d.x, y: d.y };
+    return World.nearestRoad(d.x, d.y, 3);
+  },
+  /* send a cab from its rank to a random fare somewhere across town */
+  pickTaxiRoute(stand, standTile) {
+    const dests = World.buildings.filter(b =>
+      b !== stand && b.connected && !b.ruined && !b.construction);
+    for (let tries = 0; tries < 8 && dests.length; tries++) {
+      const dst = dests[(Math.random() * dests.length) | 0];
+      const dt2 = this.streetTile(dst);
+      if (!dt2) continue;
+      const route = World.roadPath(standTile.x, standTile.y, dt2.x, dt2.y);
+      if (route && route.length > 4) return route;
+    }
+    return null;
+  },
+  tickTaxis(dt) {
+    const gm = dt * MIN_PER_SEC;
+    this.taxiT -= gm;
+    if (this.taxiT <= 0) {
+      this.taxiT = 90;
+      const stands = this.activeOf('taxistand');
+      // re-plan the fleet when the ranks or the roads change
+      const sig = stands.map(s => s.id).join(',') + '|' + World.roadStamp;
+      if (sig !== this.taxiSig) {
+        this.taxiSig = sig;
+        this.taxis = [];
+        const pop = Sim.people.length;
+        for (const stand of stands) {
+          const tile = this.streetTile(stand);
+          if (!tile) continue;
+          const nCabs = Math.min(2, 1 + (pop > 70 ? 1 : 0));
+          for (let k = 0; k < nCabs; k++) {
+            const route = this.pickTaxiRoute(stand, tile);
+            if (!route) continue;
+            this.taxis.push({
+              home: stand, standTile: tile, route, prog: 0, dir: 1, pause: 1 + k * 3,
+              x: tile.x * T + 8, y: tile.y * T + 8, dirx: 1, diry: 0, pax: [], cap: 1,
+            });
+          }
+        }
+        if (this.taxis.length) this.say(`🚕 Cabs are working the streets — ${this.taxis.length} on the road.`);
+      }
+    }
+    for (const cab of this.taxis) {
+      if (cab.pause > 0) { cab.pause -= gm; continue; }
+      // cabs hold at closed level-crossings like everything else on the road
+      const ni = cab.dir > 0 ? Math.ceil(cab.prog) : Math.floor(cab.prog);
+      if (World.crossings.size && ni !== cab.prog && ni >= 0 && ni < cab.route.length) {
+        const [nx, ny] = cab.route[ni];
+        if (World.crossings.has(World.idx(nx, ny)) && this.trainNearTile(nx, ny, 5)) continue;
+      }
+      cab.prog += 2.4 * dt * cab.dir;
+      if (cab.prog >= cab.route.length - 1) {          // dropped the fare across town
+        cab.prog = cab.route.length - 1; cab.dir = -1; cab.pause = 3;
+        if (cab.pax.length)
+          this.spawnAlighter(cab.x, cab.y, cab.dirx || 1, cab.diry || 0, cab.pax.shift());
+      }
+      if (cab.prog <= 0) {                              // back at the rank: next fare
+        cab.prog = 0; cab.dir = 1; cab.pause = 4;
+        this.serveStop(cab, cab.home);
+        const nr = this.pickTaxiRoute(cab.home, cab.standTile);
+        if (nr) cab.route = nr;
+      }
+      this.followPath(cab, cab.route, cab.prog, 3.5);
+    }
+  },
+
+  /* ---------------- queues, boarding & alighting at stops ---------------- */
+  stopQueues: new Map(), alighters: [], queueT: 0,
+  /* a vehicle at a stop: drop passengers off, then take the head of the queue */
+  serveStop(vehicle, stop) {
+    const q = this.stopQueues.get(stop.id);
+    const cx = stop.x + stop.w / 2, cy = stop.y + stop.h / 2;
+    const doorPx = { x: stop.door.x * T + 8, y: stop.door.y * T + 6 };
+    let ax = stop.door.x - cx, ay = stop.door.y - cy;              // step out toward the kerb
+    if (!ax && !ay) ay = 1;
+    if (vehicle.pax && vehicle.pax.length && Math.random() < 0.85) {
+      const n = 1 + (Math.random() < 0.35 ? 1 : 0);
+      for (let i = 0; i < n && vehicle.pax.length; i++)
+        this.spawnAlighter(doorPx.x, doorPx.y, ax, ay, vehicle.pax.shift());
+    }
+    if (q && q.waiting.length && vehicle.pax.length < vehicle.cap) {
+      const room = vehicle.cap - vehicle.pax.length;
+      const n = Math.min(room, q.waiting.length, 2);
+      for (let i = 0; i < n; i++) vehicle.pax.push(q.waiting.shift());
+      stop.visitors += n;                                          // the stop earns its keep
+    }
+  },
+  /* a passenger hops off and wanders a few steps onto the pavement, then fades */
+  spawnAlighter(px, py, awayX, awayY, pax) {
+    if (this.alighters.length > 50 || !pax) return;
+    if (World.isRail((px / T) | 0, (py / T) | 0)) return;   // never set foot on the tracks
+    const m = Math.hypot(awayX, awayY) || 1;
+    this.alighters.push({
+      seed: pax.seed, kind: pax.kind, x: px, y: py,
+      vx: (awayX / m) * 12, vy: (awayY / m) * 12,
+      life: 3.5 + Math.random() * 1.5, ph: Math.random() * 7,
+    });
+  },
+  tickTransitQueues(dt) {
+    const gm = dt * MIN_PER_SEC;
+    if (this.alighters.length) {
+      for (const a of this.alighters) {
+        a.life -= dt; a.ph += dt * 7;
+        // step forward, but stop dead at the kerb — passengers never stray onto the rails
+        const nx = a.x + a.vx * dt, ny = a.y + a.vy * dt;
+        if (World.isRail((nx / T) | 0, (ny / T) | 0)) { a.vx = 0; a.vy = 0; }
+        else { a.x = nx; a.y = ny; }
+      }
+      this.alighters = this.alighters.filter(a => a.life > 0);
+    }
+    this.queueT -= gm;
+    if (this.queueT > 0) return;
+    this.queueT = 8;   // re-poll the queues every ~8 game-minutes
+    const stops = [...this.activeOf('busstop'), ...this.activeOf('taxistand')];
+    const live = new Set();
+    const commute = (Sim.clock > 420 && Sim.clock < 600) || (Sim.clock > 1000 && Sim.clock < 1150);
+    const daytime = Sim.clock > 340 && Sim.clock < 1200;
+    for (const stop of stops) {
+      live.add(stop.id);
+      let q = this.stopQueues.get(stop.id);
+      if (!q) { q = { waiting: [] }; this.stopQueues.set(stop.id, q); }
+      // busier stops (more homes nearby, rush hour) grow a longer line
+      let homesNear = 0;
+      for (const b of World.buildings)
+        if (CAT[b.type].res && !b.ruined && Math.abs(b.x - stop.x) + Math.abs(b.y - stop.y) < 22) homesNear++;
+      let target = Math.min(6, 1 + ((homesNear / 3) | 0));
+      if (commute) target += 2;
+      if (!daytime) target = Math.min(target, 1);
+      const service = stop.type === 'busstop' ? this.buses.length : this.taxis.length;
+      if (!service) target = Math.min(target, 2);   // no service yet — a small waiting hint
+      target = Math.min(6, target);
+      if (q.waiting.length < target && Math.random() < 0.7) {
+        const seed = (stop.id * 97 + q.waiting.length * 41 + Sim.day * 7 + (Sim.clock | 0)) >>> 0;
+        q.waiting.push({ seed, kind: ['man', 'woman', 'man', 'woman', 'kid'][seed % 5] });
+      } else if (q.waiting.length > target && Math.random() < 0.3) {
+        q.waiting.pop();   // gave up waiting / walked instead
+      }
+    }
+    for (const id of [...this.stopQueues.keys()]) if (!live.has(id)) this.stopQueues.delete(id);
   },
 
   /* ---------------- trains on player-laid rails ---------------- */
